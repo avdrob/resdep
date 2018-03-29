@@ -11,6 +11,7 @@
 #endif
 
 static struct task_struct *thread_st;
+int is_running = 0;
 
 static int thread_fn(void *unused)
 {
@@ -19,6 +20,8 @@ static int thread_fn(void *unused)
 	allow_signal(SIGKILL);
 	allow_signal(SIGSTOP);
 	allow_signal(SIGCONT);
+
+	is_running = 1;
 
 	while (!kthread_should_stop()) {
 		cpu = get_cpu();
@@ -31,6 +34,7 @@ static int thread_fn(void *unused)
         }
 
 	printk(KERN_INFO "Thread Stopping\n");
+	is_running = 0;
 	do_exit(0);
 
 	return 0;
@@ -57,7 +61,7 @@ static int __init init_thread(void)
 static void __exit cleanup_thread(void)
 {
 	printk(KERN_INFO "Cleaning Up\n");
-	if (thread_st)
+	if (thread_st && is_running)
 	{
 		kthread_stop(thread_st);
 		printk(KERN_INFO "Thread stopped");
