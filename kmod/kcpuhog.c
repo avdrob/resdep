@@ -24,32 +24,36 @@ int is_running = 0;
 enum hrtimer_restart my_hrtimer_callback(struct hrtimer *timer )
 {
 	printk(KERN_INFO "my_hrtimer_callback is called\n");
-	hrtimer_forward_now(&hr_timer, ktime_set(0, MS_TO_NS(sleep_time_ms)));
+
+	if (is_running) {
+		is_running = 0;
+		hrtimer_forward_now(&hr_timer,
+				ktime_set(0, MS_TO_NS(sleep_time_ms)));
+	}
+	else {
+		is_running = 1;
+		hrtimer_forward_now(&hr_timer,
+				ktime_set(0, MS_TO_NS(work_time_ms)));
+	}
+
 
 	return kthread_alive ? HRTIMER_RESTART : HRTIMER_NORESTART;
 }
 
 static int thread_fn(void *unused)
 {
-	unsigned int cpu;
-
-	allow_signal(SIGKILL);
-	allow_signal(SIGSTOP);
-	allow_signal(SIGCONT);
-
+	// unsigned int cpu;
 	kthread_alive = 1;
 	is_running = 1;
 
-	while (is_running && !kthread_should_stop()) {
-		cpu = get_cpu();
-		put_cpu();
-		printk(KERN_INFO "kcpuhog: cpu = %d\n", cpu);
-		if (signal_pending(thread_st)) {
-			break;
-		}
-        }
+restart:
+	while (is_running && !kthread_should_stop()) {};
+	if (kthread_should_stop())
+		goto term;
+	usleep_range(MS_TO_NS(sleep_time_ms), MS_TO_NS(sleep_time_ms));
+	goto restart;
 
-
+term:
 	printk(KERN_INFO "Thread Stopping\n");
 	kthread_alive = 0;
 	do_exit(0);
@@ -93,6 +97,7 @@ static void __exit cleanup_thread(void)
 
 	if (thread_st && kthread_alive)
 	{
+		kthread_alive = 0;
 		kthread_stop(thread_st);
 		printk(KERN_INFO "Thread stopped");
 	}
