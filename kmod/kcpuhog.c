@@ -2,14 +2,8 @@
 #include <linux/kernel.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
-#include <linux/version.h>
-#include <linux/hrtimer.h>
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0)
+#include <linux/sched/types.h>
 #include <linux/sched.h>
-#else
-#include <linux/sched/signal.h>
-#endif
 
 #define MS_TO_NS(x) (x * 1E6L)
 
@@ -47,7 +41,12 @@ static int thread_fn(void *unused)
 	is_running = 1;
 
 restart:
-	while (is_running && !kthread_should_stop()) {};
+	/*
+	while (is_running && !kthread_should_stop()) {
+		printk(KERN_INFO "I'M PRINTING!\n");
+	}
+	*/
+	mdelay(work_time_ms);
 	if (kthread_should_stop())
 		goto term;
 	usleep_range(MS_TO_NS(sleep_time_ms), MS_TO_NS(sleep_time_ms));
@@ -64,16 +63,21 @@ term:
 static int __init init_thread(void)
 {
 	unsigned int cpu;
+	struct sched_param param = { .sched_priority = MAX_RT_PRIO - 1 };
 
 	printk(KERN_INFO "Creating Thread\n");
 	cpu = 1;
+	param.sched_priority = 90;
 
+	/*
 	hrtimer_init(&hr_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	hr_timer.function = my_hrtimer_callback;
 	hrtimer_start(&hr_timer, ktime_set(0, MS_TO_NS(work_time_ms)),
 			HRTIMER_MODE_REL);
+	*/
 
 	thread_st = kthread_create(thread_fn, NULL, "kcpuhog");
+	sched_setscheduler(thread_st, SCHED_FIFO, &param);
 	kthread_bind(thread_st, cpu);
 	wake_up_process(thread_st);
 
@@ -87,13 +91,15 @@ static int __init init_thread(void)
 
 static void __exit cleanup_thread(void)
 {
-	int ret;
+	// int ret;
 
 	printk(KERN_INFO "Cleaning Up\n");
 
+	/*
 	ret = hrtimer_cancel(&hr_timer);
 	if (ret)
 		printk(KERN_INFO "The timer was still in use...\n");
+	*/
 
 	if (thread_st && kthread_alive)
 	{
