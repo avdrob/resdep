@@ -18,9 +18,10 @@ struct hog_thread_data {
 	int cpu;
 	bool is_running;
 };
+static struct hog_thread_data hog_data[4];
 
-static struct task_struct *hog_thread;
-static struct hrtimer hog_hrtimer;
+// static struct task_struct *hog_thread;
+// static struct hrtimer hog_hrtimer;
 static bool is_running;
 
 const unsigned long work_time_ms = 200L;
@@ -44,13 +45,13 @@ enum hrtimer_restart hog_hrtimer_callback(struct hrtimer *timer )
 	return HRTIMER_RESTART;
 }
 
-static int hog_thread_fn(void *data)
+static int hog_threadfn(void *d)
 {
-	// unsigned long start_jiffies, tmo;
+	struct hog_thread_data *data = (struct hog_thread_data *)d;
 
-	hrtimer_init(&hog_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	hog_hrtimer.function = hog_hrtimer_callback;
-	hrtimer_start(&hog_hrtimer, ktime_set(0, MS_TO_NS(work_time_ms)),
+	hrtimer_init(&data->hog_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	data->hog_hrtimer.function = hog_hrtimer_callback;
+	hrtimer_start(&data->hog_hrtimer, ktime_set(0, MS_TO_NS(work_time_ms)),
 			HRTIMER_MODE_REL);
 
 	is_running = true;
@@ -66,30 +67,8 @@ static int hog_thread_fn(void *data)
 	}
 
 	printk(KERN_INFO "[kcpuhog]: Cancel timer\n");
-	if (hrtimer_cancel(&hog_hrtimer))
+	if (hrtimer_cancel(&data->hog_hrtimer))
 		printk(KERN_INFO "[kcpuhog]: The timer was active\n");
-
-	/*
-restart:
-
-	start_jiffies = jiffies;
-	tmo = msecs_to_jiffies(work_time_ms);
-	printk(KERN_INFO "[kcpuhog]: begin busyloop\n");
-	while (jiffies < start_jiffies + tmo)
-		cpu_relax();
-	printk(KERN_INFO "[kcpuhog]: end busyloop\n");
-
-	if (kthread_should_stop())
-		goto term;
-
-	printk(KERN_INFO "[kcpuhog]: begin sleep\n");
-	usleep_range(MS_TO_US(sleep_time_ms), MS_TO_US(sleep_time_ms));
-	printk(KERN_INFO "[kcpuhog]: end sleep\n");
-
-	goto restart;
-
-term:
-	*/
 
 	printk(KERN_INFO "[kcpuhog]: Thread Stopping\n");
 	do_exit(0);
@@ -97,21 +76,16 @@ term:
 	return 0;
 }
 
-static int __init init_thread(void)
+static int __init kcpuhog_init(void)
 {
-	unsigned int cpu;
-
-	// struct sched_param param = { .sched_priority = MAX_RT_PRIO - 1 };
-
 	printk(KERN_INFO "[kcpuhog]: Creating Thread\n");
-	cpu = 1;
+	hog_data[0].cpu = 1;
+	hog_data[0].hog_thread = kthread_create(hog_threadfn, &(hog_data[0]),
+			"kcpuhog_%d", hog_data[0].cpu);
+	kthread_bind(hog_data[0].hog_thread, hog_data[0].cpu);
+	wake_up_process(hog_data[0].hog_thread);
 
-	hog_thread = kthread_create(hog_thread_fn, NULL, "kcpuhog");
-	// sched_setscheduler(hog_thread, SCHED_FIFO, &param);
-	kthread_bind(hog_thread, cpu);
-	wake_up_process(hog_thread);
-
-	if (IS_ERR(hog_thread))
+	if (IS_ERR(hog_data[0].hog_thread))
 		printk(KERN_ERR "[kcpuhog]: Thread creation failed\n");
         else
 		printk(KERN_INFO "[kcpuhog]: Thread Created successfully\n");
@@ -119,13 +93,13 @@ static int __init init_thread(void)
 	return 0;
 }
 
-static void __exit cleanup_thread(void)
+static void __exit kcpuhog_exit(void)
 {
 	printk(KERN_INFO "[kcpuhog]: Cleaning Up\n");
-	kthread_stop(hog_thread);
+	kthread_stop(hog_data[0].hog_thread);
 	printk(KERN_INFO "[kcpuhog]: Thread stopped");
 }
 
 MODULE_LICENSE("GPL");
-module_init(init_thread);
-module_exit(cleanup_thread);
+module_init(kcpuhog_init);
+module_exit(kcpuhog_exit);
