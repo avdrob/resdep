@@ -4,6 +4,8 @@
 #include <linux/delay.h>
 #include <linux/sched.h>
 #include <linux/version.h>
+#include <linux/cpumask.h>
+#include <linux/slab.h>
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
 #include <linux/sched/types.h>
@@ -21,14 +23,9 @@ struct hog_thread_data {
 	unsigned long sleep_time_ms;
 	bool is_running;
 };
-static struct hog_thread_data hog_data[4];
+static struct hog_thread_data *hog_data;
 
-// static struct task_struct *hog_thread;
-// static struct hrtimer hog_hrtimer;
-// static bool is_running;
-
-// unsigned long work_time_ms = 200;
-// unsigned long sleep_time_ms = 800;
+static unsigned int num_cpus;
 
 enum hrtimer_restart hog_hrtimer_callback(struct hrtimer *timer)
 {
@@ -86,18 +83,27 @@ static int hog_threadfn(void *d)
 static int __init kcpuhog_init(void)
 {
 	printk(KERN_INFO "[kcpuhog]: Creating Thread\n");
-	hog_data[0].cpu = 1;
+
+	num_cpus = num_online_cpus();
+	hog_data = kmalloc(sizeof(struct hog_thread_data)*num_cpus, GFP_KERNEL);
+	if (!hog_data) {
+		printk(KERN_ERR "[kcpuhog]: kmalloc failed\n");
+		return -ENOMEM;
+	}
+
 	hog_data[0].hog_thread = kthread_create(hog_threadfn, &(hog_data[0]),
 				"kcpuhog_%d", hog_data[0].cpu);
-	hog_data[0].work_time_ms = 270;
-	hog_data[0].sleep_time_ms = MSEC_IN_SEC - hog_data[0].work_time_ms;
-	kthread_bind(hog_data[0].hog_thread, hog_data[0].cpu);
-	wake_up_process(hog_data[0].hog_thread);
-
 	if (IS_ERR(hog_data[0].hog_thread))
 		printk(KERN_ERR "[kcpuhog]: Thread creation failed\n");
         else
 		printk(KERN_INFO "[kcpuhog]: Thread Created successfully\n");
+
+	hog_data[0].work_time_ms = 270;
+	hog_data[0].sleep_time_ms = MSEC_IN_SEC - hog_data[0].work_time_ms;
+	hog_data[0].cpu = 1;
+	kthread_bind(hog_data[0].hog_thread, hog_data[0].cpu);
+	wake_up_process(hog_data[0].hog_thread);
+
 
 	return 0;
 }
@@ -106,7 +112,8 @@ static void __exit kcpuhog_exit(void)
 {
 	printk(KERN_INFO "[kcpuhog]: Cleaning Up\n");
 	kthread_stop(hog_data[0].hog_thread);
-	printk(KERN_INFO "[kcpuhog]: Thread stopped");
+	kfree(hog_data);
+	printk(KERN_INFO "[kcpuhog]: Thread stopped\n");
 }
 
 MODULE_LICENSE("GPL");
