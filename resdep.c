@@ -67,7 +67,7 @@ static void getargs(int argc, char *argv[])
 			load.ut = trytoconv();
 			break;
 		case 'm':
-			load.rt = trytoconv();
+			load.mem = trytoconv();
 			break;
 		case 'h':
 			usage(stdout, EXIT_SUCCESS);
