@@ -10,7 +10,6 @@ char *progname;
 struct load {
 	int st;
 	int ut;
-	int rt;
 	int mem;
 };
 static struct load load = {0};
@@ -19,7 +18,6 @@ static struct option longopts[] = {
 	{"help", no_argument, NULL, 'h'},
 	{"systime", required_argument, NULL, 's'},
 	{"usertime", required_argument, NULL, 'u'},
-	{"realtime", required_argument, NULL, 'r'},
 	{"memory", required_argument, NULL, 'm'},
 
 	{NULL, no_argument, NULL, 0}
@@ -29,8 +27,8 @@ static void usage(FILE *stream, int status)
 {
 	fprintf(stream,
 	"Usage: %s [-s systime] [-u usertime] [-r realtime] [-m memory]\n"
-	"\t[--systime=systime] [--usertime=usertime] [--realtime=realtime]\n"
-	"\t[--memory=memory] [--help]\n\n"
+	"\t[--systime=systime] [--usertime=usertime] [--memory=memory]\n"
+	"\t[--help]\n\n"
 	"All the values are given in percentages: [0-100]\n",
 	progname);
 
@@ -67,9 +65,6 @@ static void getargs(int argc, char *argv[])
 			break;
 		case 'u':
 			load.ut = trytoconv();
-			break;
-		case 'r':
-			load.rt = trytoconv();
 			break;
 		case 'm':
 			load.rt = trytoconv();
