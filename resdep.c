@@ -2,6 +2,7 @@
 #include <getopt.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <libgen.h>
 
 /* The name this program was invoked by. */
 char *progname;
@@ -55,9 +56,12 @@ static void getargs(int argc, char *argv[])
 {
 	int opt;
 
-	progname = argv[0];
+	progname = basename(argv[0]);
 
-	while ((opt = getopt_long(argc, argv, "s:u:r:m:", longopts, NULL))
+	if (argc < 2)
+		usage(stderr, EXIT_FAILURE);
+
+	while ((opt = getopt_long(argc, argv, "-s:u:m:h", longopts, NULL))
 		!= -1) {
 		switch (opt) {
 		case 's':
@@ -71,6 +75,10 @@ static void getargs(int argc, char *argv[])
 			break;
 		case 'h':
 			usage(stdout, EXIT_SUCCESS);
+		case 1:
+			fprintf(stderr, "%s: nonoption argument -- '%s'\n",
+				progname, argv[optind - 1]);
+			usage(stderr, EXIT_FAILURE);
 		default:
 			usage(stderr, EXIT_FAILURE);
 		}
