@@ -1,7 +1,7 @@
 TARGET := resdep
 CC := gcc
 CFLAGS=-Wall -g
-LDFLAGS=-lm -pthread -lrt
+LDFLAGS=-lm -lrt
 SRC_DIRS := .
 SRCS := $(shell find $(SRC_DIRS) -name *.c)
 OBJS := $(addsuffix .o, $(basename $(SRCS)))

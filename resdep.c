@@ -5,20 +5,16 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
-#include <libgen.h>
 #include <math.h>
-#include <pthread.h>
-#include <sys/types.h>
-#include <sys/syscall.h>
+#include <sys/wait.h>
+#include <sys/prctl.h>
 #include <sched.h>
-#include <signal.h>
 #include <time.h>
+#include <string.h>
 
 #define CLOCKID			CLOCK_MONOTONIC
 #define TIMER_SIG		SIGALRM
-
-/* This is a workaroud (See https://lkml.org/lkml/2010/10/17/181) */
-#define sigev_notify_thread_id	_sigev_un._tid
+#define CMDLINE_LENGTH		256
 
 #define err_exit(msg)		do { \
 					perror(msg); \
@@ -38,30 +34,26 @@ struct sys_load {
 	int ut;
 	int mem;
 };
-static struct sys_load sys_load = {0};
 
-/* CPU load argument for both user & kernel threads */
+/* CPU load argument for both user processes & kernel threads */
 struct cpu_load {
 	int cpu_num;
 	int load_msec;
 };
 
-/* Generic structure containing thread data */
-struct thread_struct {
-	pthread_t ptid;			/* POSIX thread ID */
-	pid_t tid;			/* Kernel's thread ID */
+/* Generic structure containing process data */
+struct proc_struct {
+	pid_t pid;
 
-	struct cpu_load cpu_load;
-	int is_running;
+	struct cpu_load cpu_load;	/* CPU load for particular process */
+	int is_running;			/* Flag indicating wether process is
+					 * running on CPU or sleeping
+					 */
 
-	int thr_num;			/* Total number of threads */
-	int ind;			/* Index number of thread */
-
-	timer_t timerid;
-	struct itimerspec work_ts;
-	struct itimerspec sleep_ts;
+	int proc_num;			/* Total number of processes */
+	int ind;			/* Index number of process */
 };
-static struct thread_struct *thr;
+static struct proc_struct proc;
 
 static struct option longopts[] = {
 	{"help", no_argument, NULL, 'h'},
@@ -84,7 +76,7 @@ static void usage(FILE *stream, int status)
 	exit(status);
 }
 
-static inline int trytoconv()
+static int trytoconv()
 {
 	static int ret;
 	static char *endptr;
@@ -100,7 +92,7 @@ static inline int trytoconv()
 	return ret;
 }
 
-static void getargs(int argc, char *argv[])
+static void getargs(int argc, char *argv[], struct sys_load *sys_load)
 {
 	int opt;
 
@@ -113,13 +105,13 @@ static void getargs(int argc, char *argv[])
 		!= -1) {
 		switch (opt) {
 		case 's':
-			sys_load.st = trytoconv();
+			sys_load->st = trytoconv();
 			break;
 		case 'u':
-			sys_load.ut = trytoconv();
+			sys_load->ut = trytoconv();
 			break;
 		case 'm':
-			sys_load.mem = trytoconv();
+			sys_load->mem = trytoconv();
 			break;
 		case 'h':
 			usage(stdout, EXIT_SUCCESS);
@@ -133,109 +125,79 @@ static void getargs(int argc, char *argv[])
 	}
 }
 
-static void thr_state_swith(int sig, siginfo_t *info, void *ucontext)
+static void proc_state_swith(int sig)
 {
-	struct thread_struct *data = (struct thread_struct *)
-						info->si_value.sival_ptr;
-	if (data->is_running)
-		data->is_running = 0;
+	if (proc.is_running)
+		proc.is_running = 0;
 
 	return;
 }
 
-static void print_ts(void)
-{
-	struct timespec ts;
-
-	clock_gettime(CLOCKID, &ts);
-	printf("[%ld.%ld] ", ts.tv_sec, ts.tv_nsec / 1000);
-
-	return;
-}
-
-static void *cpu_thr_func(void *arg)
+static void cpu_proc_func(void)
 {
 	cpu_set_t set;
-	struct thread_struct *data;
 	struct sigevent sev;
 	struct sigaction sa;
-	struct timespec delay;
+	timer_t timerid;
+	struct itimerspec work_its;
+	struct timespec	sleep_ts, delay;
 
-	data = (struct thread_struct *)arg;
-	data->tid = syscall(__NR_gettid);
+	/* Make sure children are dead after parent's death */
+	if (prctl(PR_SET_PDEATHSIG, SIGTERM) < 0)
+		err_exit("prctl");
 
-	/* Set thread afffinity */
+	/* Set process CPU afffinity */
 	CPU_ZERO(&set);
-	CPU_SET(data->cpu_load.cpu_num, &set);
+	CPU_SET(proc.cpu_load.cpu_num, &set);
 	if (sched_setaffinity(0, sizeof(set), &set) < 0)
 		err_exit("sched_setaffinity");
 
-	/* int i;
-	if (sched_getaffinity(0, sizeof(set), &set) < 0)
-		err_exit("sched_getaffinity");
-	for (i = 0; i < sysconf(_SC_NPROCESSORS_ONLN); i++) {
-		if (CPU_ISSET(i, &set)) {
-			print_ts();
-			printf("thread %d: CPU %d\n", data->tid, i);
-			fflush(stdout);
-		}
-	} */
-
 	/* Establish handler for timer signal */
-	sa.sa_sigaction = thr_state_swith;
-	sa.sa_flags = SA_SIGINFO;
+	sa.sa_handler = proc_state_swith;
+	sa.sa_flags = 0;
 	sigemptyset(&sa.sa_mask);
 	if (sigaction(TIMER_SIG, &sa, NULL) < 0)
 		err_exit("sigaction");
 
 	/* Create the timer */
-	sev.sigev_notify = SIGEV_THREAD_ID;
+	sev.sigev_notify = SIGEV_SIGNAL;
 	sev.sigev_signo = TIMER_SIG;
-	sev.sigev_notify_thread_id = data->tid;
-	sev.sigev_value.sival_ptr = (void *) data;
-	if (timer_create(CLOCKID, &sev, &(data->timerid)) < 0)
+	if (timer_create(CLOCKID, &sev, &timerid) < 0)
 		err_exit("timer_create");
 
-	/* Set thread's work and sleep times */
+	/* Set process work and sleep times */
 
 	/* We don't want it to be periodic */
-	data->work_ts.it_interval.tv_sec = 0;
-	data->work_ts.it_interval.tv_nsec = 0;
-	data->sleep_ts.it_interval.tv_sec = 0;
-	data->sleep_ts.it_interval.tv_nsec = 0;
+	work_its.it_interval.tv_sec = 0;
+	work_its.it_interval.tv_nsec = 0;
 
-	/* Set one-time expiration values; timer is re-armed with those
+	/* Set one-time expiration value; timer is re-armed with those
 	 * values by signal handler.
 	 */
-	data->work_ts.it_value.tv_sec = 0;
-	data->work_ts.it_value.tv_nsec = MSEC_TO_NSEC(data->cpu_load.load_msec);
-	data->sleep_ts.it_value.tv_sec = 0;
-	data->sleep_ts.it_value.tv_nsec = NSEC_PER_SEC -
-						data->work_ts.it_value.tv_nsec;
+	work_its.it_value.tv_sec = 0;
+	work_its.it_value.tv_nsec = MSEC_TO_NSEC(proc.cpu_load.load_msec);
 
-	/* TODO: sleep for dome time here... */
+	/* Set sleep time */
+	sleep_ts.tv_sec = 0;
+	sleep_ts.tv_nsec = NSEC_PER_SEC - work_its.it_value.tv_nsec;
+
+	/* Distribute timer events evenly
+	 *
+	 *  0       1/3        2/3        1s
+	 *  |--------*----------*---------|
+	 * proc1   proc2      proc3	proc1
+	 */
 	delay.tv_sec = 0;
-	delay.tv_nsec = (NSEC_PER_SEC / data->thr_num) * data->ind;
-	// clock_nanosleep(CLOCKID, 0, &delay, NULL);
+	delay.tv_nsec = (NSEC_PER_SEC / proc.proc_num) * proc.ind;
+	clock_nanosleep(CLOCKID, 0, &delay, NULL);
 
-	data->is_running = 1;
+	proc.is_running = 1;
 	while (1) {
-		/* print_ts();
-		printf("thread %d: begin work\n", data->tid);
-		fflush(stdout); */
-		timer_settime(data->timerid, 0, &(data->work_ts), NULL);
-		while (data->is_running)
+		timer_settime(timerid, 0, &work_its, NULL);
+		while (proc.is_running)
 			sqrt(rand());
-		/* print_ts();
-		printf("thread %d: end work\n", data->tid);
-		print_ts();
-		printf("thread %d: begin sleep\n", data->tid);
-		fflush(stdout); */
-		clock_nanosleep(CLOCKID, 0, &(data->sleep_ts.it_value), NULL);
-		data->is_running = 1;
-		/* print_ts();
-		printf("thread %d: end sleep\n", data->tid);
-		fflush(stdout); */
+		clock_nanosleep(CLOCKID, 0, &sleep_ts, NULL);
+		proc.is_running = 1;
 	}
 }
 
@@ -243,31 +205,41 @@ int main(int argc, char *argv[])
 {
 	int i;
 	int cpus_onln;
-	int thr_num;
+	int proc_num;
+	char *cmd;
+	struct sys_load sys_load = {0};
 
-	/* Fill some static struct with option values */
-	getargs(argc, argv);
+	/* Parse command line arguments*/
+	getargs(argc, argv, &sys_load);
+
+	/* Make sure there are no instances of the program:
+	 * pgrep resdep | grep -v <current pid> | xargs kill -9 2>/dev/null
+	 */
+	cmd = calloc(CMDLINE_LENGTH, sizeof(char));
+	strcpy(cmd, "pgrep ");
+	strcat(cmd, progname);
+	strcat(cmd, " | grep -v ");
+	sprintf(&cmd[strlen(cmd)], "%d", getpid());
+	strcat(cmd, " | xargs kill -9 2>/dev/null");
+	system(cmd);
+	free(cmd);
 
 	cpus_onln = sysconf(_SC_NPROCESSORS_ONLN);
-	thr_num = 2;
-	thr = (struct thread_struct *) calloc(cpus_onln,
-			sizeof(struct thread_struct));
+	proc_num = cpus_onln;
 
-	for (i = 0; i < thr_num; i++) {
-		if (pthread_create(&(thr[i].ptid), NULL, cpu_thr_func,
-					&(thr[i])))
-			err_exit("pthread_create");
+	for (i = 0; i < proc_num; i++) {
+		proc.proc_num = proc_num;
+		proc.ind = i;
+		proc.cpu_load.cpu_num = i;
+		proc.cpu_load.load_msec = PCT_TO_MSEC(sys_load.ut);
 
-		thr[i].thr_num = thr_num;
-		thr[i].ind = i;
-		thr[i].cpu_load.cpu_num = i;
-		thr[i].cpu_load.load_msec = PCT_TO_MSEC(sys_load.ut);
+		proc.pid = fork();
+		if (!proc.pid)
+			cpu_proc_func();
 	}
 
-	for (i = 0; i < thr_num; i++)
-		if (pthread_join(thr[i].ptid, NULL))
-			err_exit("pthread_join");
-	free(thr);
+	for (i = 0; i < proc_num; i++)
+		wait(NULL);
 
 	return 0;
 }
