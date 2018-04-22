@@ -3,7 +3,7 @@ CC := gcc
 CFLAGS=-Wall -g
 LDFLAGS=-lm -lrt
 SRC_DIRS := .
-SRCS := $(shell find $(SRC_DIRS) -name *.c)
+SRCS := $(shell find $(SRC_DIRS) -maxdepth 1 -name '*.c')
 OBJS := $(addsuffix .o, $(basename $(SRCS)))
 
 $(TARGET): $(OBJS)
