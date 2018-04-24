@@ -15,6 +15,7 @@
 #define CLOCKID			CLOCK_MONOTONIC
 #define TIMER_SIG		SIGALRM
 #define CMDLINE_LENGTH		256
+#define KMOD_PATH		"kmod/kcpuhog.ko"
 
 #define err_exit(msg)		do { \
 					perror(msg); \
@@ -201,6 +202,43 @@ static void cpu_proc_func(void)
 	}
 }
 
+void killall_prev(char *cmd)
+{
+	/* Execute the command:
+	 * pgrep resdep | grep -v <current pid> | xargs kill -9 2>/dev/null
+	 */
+	strcpy(cmd, "pgrep ");
+	strcat(cmd, progname);
+	strcat(cmd, " | grep -v ");
+	sprintf(&cmd[strlen(cmd)], "%d", getpid());
+	strcat(cmd, " | xargs kill -9 2>/dev/null");
+	system(cmd);
+}
+
+void kmod_load(char *cmd)
+{
+	strcpy(cmd, "sudo insmod ");
+	strcat(cmd, KMOD_PATH);
+
+	/* insmod termination status should be 0; it will write to stderr
+	 * itself if smth is wrong
+	 */
+	if (system(cmd))
+		exit(EXIT_FAILURE);
+}
+
+void kmod_unload(char *cmd)
+{
+	char *kmod_name;
+
+	kmod_name = basename(KMOD_PATH);
+	strcpy(cmd, "sudo rmmod ");
+	strncat(cmd, kmod_name, strrchr(kmod_name, '.') - kmod_name);
+
+	/* As insmod, rmmod will log itself */
+	system(cmd);
+}
+
 int main(int argc, char *argv[])
 {
 	int i;
@@ -209,19 +247,18 @@ int main(int argc, char *argv[])
 	char *cmd;
 	struct sys_load sys_load = {0};
 
-	/* Parse command line arguments*/
+	/* Parse command line arguments */
 	getargs(argc, argv, &sys_load);
 
-	/* Make sure there are no instances of the program:
-	 * pgrep resdep | grep -v <current pid> | xargs kill -9 2>/dev/null
-	 */
+	/* Buffer for shell execution */
 	cmd = calloc(CMDLINE_LENGTH, sizeof(char));
-	strcpy(cmd, "pgrep ");
-	strcat(cmd, progname);
-	strcat(cmd, " | grep -v ");
-	sprintf(&cmd[strlen(cmd)], "%d", getpid());
-	strcat(cmd, " | xargs kill -9 2>/dev/null");
-	system(cmd);
+
+	/* Make sure there are no instances of the program */
+	killall_prev(cmd);
+
+	/* Load kernel module */
+	kmod_unload(cmd);
+
 	free(cmd);
 
 	cpus_onln = sysconf(_SC_NPROCESSORS_ONLN);
