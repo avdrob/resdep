@@ -187,6 +187,13 @@ static void cpu_proc_func(void)
 	 *  |--------*----------*---------|
 	 * proc1   proc2      proc3	proc1
 	 */
+
+	/* 1 second alignment */
+	clock_gettime(CLOCKID, &delay);
+	delay.tv_sec++;
+	delay.tv_nsec = 0;
+	clock_nanosleep(CLOCKID, TIMER_ABSTIME, &delay, NULL);
+
 	delay.tv_sec = 0;
 	delay.tv_nsec = (NSEC_PER_SEC / proc.proc_num) * proc.ind;
 	clock_nanosleep(CLOCKID, 0, &delay, NULL);
