@@ -84,8 +84,8 @@ static int trytoconv()
 	endptr = "";
 	ret = strtol(optarg, &endptr, 10);
 	if (endptr[0] != '\0' || ret < 0 || ret > 100) {
-		fprintf(stderr, "%s: invalid argument: %s\nLoad value should be in"
-				" range [0-100]\n", progname, optarg);
+		fprintf(stderr, "%s: invalid argument: %s\nLoad value should"
+				"be in range [0-100]\n", progname, optarg);
 		exit (EXIT_FAILURE);
 	}
 
