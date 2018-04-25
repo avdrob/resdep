@@ -20,8 +20,8 @@ trap "exit" INT TERM
 trap "cleanup; kill 0" EXIT
 
 if ! ls "$PROGPATH" &>/dev/null; then
-	echo "$PROGPATH": No such file
-	echo run \"make\"
+	echo $(basename $PROGPATH): No such file
+	echo Run \"make\"
 	exit 1
 fi
 
