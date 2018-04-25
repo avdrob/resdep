@@ -215,7 +215,6 @@ int main(int argc, char *argv[])
 	int proc_num;
 	struct sys_load sys_load = {0};
 
-	/* Parse command line arguments */
 	getargs(argc, argv, &sys_load);
 
 	cpus_onln = sysconf(_SC_NPROCESSORS_ONLN);
