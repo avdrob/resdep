@@ -1,4 +1,4 @@
-TARGET := resdep
+TARGET := resdep_bin
 CC := gcc
 CFLAGS=-Wall -g
 LDFLAGS=-lm -lrt

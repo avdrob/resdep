@@ -1,0 +1,41 @@
+#!/bin/bash
+
+PROGPATH="${PWD}/resdep_bin"
+PROGNAME="resdep"
+KMOD_PATH="kmod/kcpuhog.ko"
+KMOD_NAME="kcpuhog"
+
+function kmod_unload() {
+	if lsmod | grep -q "$KMOD_NAME"; then
+		sudo rmmod "$KMOD_NAME"
+	fi
+}
+
+function cleanup() {
+	echo "Do some cleanup..."
+	# kmod_unload
+}
+
+trap "exit" INT TERM
+trap "cleanup; kill 0" EXIT
+
+if ! ls "$PROGPATH" &>/dev/null; then
+	echo "$PROGPATH": No such file
+	echo run \"make\"
+	exit 1
+fi
+
+# firstly kill all previous instances, if any
+pgrep "$PROGNAME" | grep -v $$ | xargs kill -9 2>/dev/null
+
+# unload kernel module, if it is present
+# kmod_unload
+
+# now load the module
+# if ! sudo insmod "$KMOD_PATH"; then
+	# exit 1
+# fi
+
+# run a subshell and execute target program with proper name
+(exec -a "$PROGNAME" "$PROGPATH" "$@") &
+wait
