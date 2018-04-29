@@ -1,3 +1,4 @@
+EXTRA_CFLAGS := -I$(src)/..
 obj-m += kcpuhog.o net_kernel.o
 
 all:

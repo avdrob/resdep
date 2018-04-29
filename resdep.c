@@ -11,6 +11,11 @@
 #include <sched.h>
 #include <time.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <linux/netlink.h>
+
+#include "cpu_nl.h"
 
 #define CLOCKID			CLOCK_MONOTONIC
 #define TIMER_SIG		SIGALRM
@@ -33,12 +38,6 @@ struct sys_load {
 	int st;
 	int ut;
 	int mem;
-};
-
-/* CPU load argument for both user processes & kernel threads */
-struct cpu_load {
-	int cpu_num;
-	int load_msec;
 };
 
 /* Generic structure containing process data */
@@ -208,6 +207,99 @@ static void cpu_proc_func(void)
 	}
 }
 
+static void process_ack(struct nlmsghdr *nlh, struct nlmsghdr *nlh_ack)
+{
+	if (nlh->nlmsg_seq != nlh_ack->nlmsg_seq) {
+		fprintf(stderr, "Nlmsg sequence number mismatch: %d instead of "
+				"%d\n", nlh_ack->nlmsg_seq, nlh->nlmsg_seq);
+		exit(EXIT_FAILURE);
+	}
+	if (nlh_ack->nlmsg_type != NLMSG_ERROR) {
+		fprintf(stderr, "Nlmsg type mismatch: should be NLMSG_ERROR\n");
+		exit(EXIT_FAILURE);
+	}
+	else {
+		struct nlmsgerr *err = (struct nlmsgerr *) NLMSG_DATA(nlh_ack);
+		if (err->error != 0) {
+			fprintf(stderr, "Nlmsg error == %d instead of %d\n",
+					err->error, 0);
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	return;
+}
+
+static void send_to_kernel(int cpus_onln, const struct sys_load *sys_load)
+{
+	int i, sock_fd, thr_num;
+	struct sockaddr_nl src_addr, dest_addr;
+	struct nlmsghdr *nlh, *nlh_ack;
+	struct cpu_load cpu_load;
+
+	sock_fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_CPUHOG);
+	if (sock_fd < 0)
+		err_exit("socket");
+
+	memset(&src_addr, 0, sizeof(src_addr));
+	src_addr.nl_family = AF_NETLINK;
+	src_addr.nl_pid = getpid();
+	if (bind(sock_fd, (struct sockaddr *) &src_addr, sizeof(src_addr)) < 0)
+		err_exit("bind");
+
+	memset(&dest_addr, 0, sizeof(dest_addr));
+	dest_addr.nl_family = AF_NETLINK;
+	dest_addr.nl_pid = 0;		/* destination == kernel */
+	dest_addr.nl_groups = 0;	/* unicast */
+
+	nlh = (struct nlmsghdr *) malloc(NLMSG_SPACE(sizeof(struct cpu_load)));
+	memset(nlh, 0, NLMSG_SPACE(sizeof(struct cpu_load)));
+	nlh->nlmsg_len = NLMSG_LENGTH(sizeof(struct cpu_load));
+	nlh->nlmsg_type = NLMSG_NOOP;
+	nlh->nlmsg_flags |= NLM_F_ACK;	/* Request an ack from kernel */
+	nlh->nlmsg_pid = getpid();
+
+	/* Send number of threads to kernel */
+	thr_num = cpus_onln;
+	nlh->nlmsg_seq = 0;
+	memcpy(NLMSG_DATA(nlh), &thr_num, sizeof(thr_num));
+	if (sendto(sock_fd, (void *) nlh, nlh->nlmsg_len, 0, (struct sockaddr *)
+			&dest_addr, sizeof(struct sockaddr_nl)) < 0)
+		err_exit("sendto");
+
+	/* Now try to receive acknowledgement */
+	nlh_ack = (struct nlmsghdr *) malloc(NLMSG_SPACE(sizeof(struct nlmsgerr)));
+	memset(nlh_ack, 0, NLMSG_SPACE(sizeof(struct nlmsgerr)));
+	if (recv(sock_fd, (void *) nlh_ack,
+				NLMSG_LENGTH(sizeof(struct nlmsgerr)), 0) < 0)
+		err_exit("recv");
+	process_ack(nlh, nlh_ack);
+	return;
+
+	/* Send all CPU loads to kernel */
+	for (i = 0; i < cpus_onln; i++) {
+		cpu_load.cpu_num = i;
+		cpu_load.load_msec = PCT_TO_MSEC(sys_load->st);
+
+		nlh->nlmsg_seq++;
+		memcpy(NLMSG_DATA(nlh), &cpu_load, sizeof(cpu_load));
+		if (sendto(sock_fd, (void *) nlh, nlh->nlmsg_len, 0,
+					(struct sockaddr *) &dest_addr,
+					sizeof(struct sockaddr_nl) < 0))
+			err_exit("sendto");
+
+		memset(nlh_ack, 0, NLMSG_SPACE(sizeof(struct nlmsgerr)));
+		if (recv(sock_fd, (void *) nlh_ack,
+				NLMSG_LENGTH(sizeof(struct nlmsgerr)), 0) < 0)
+			err_exit("recv");
+		process_ack(nlh, nlh_ack);
+	}
+
+	free(nlh);
+	free(nlh_ack);
+	close(sock_fd);
+}
+
 int main(int argc, char *argv[])
 {
 	int i;
@@ -219,6 +311,9 @@ int main(int argc, char *argv[])
 
 	cpus_onln = sysconf(_SC_NPROCESSORS_ONLN);
 	proc_num = cpus_onln;
+
+	send_to_kernel(cpus_onln, &sys_load);
+	return 0;
 
 	for (i = 0; i < proc_num; i++) {
 		proc.proc_num = proc_num;

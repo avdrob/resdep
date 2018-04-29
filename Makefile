@@ -1,6 +1,6 @@
 TARGET := resdep_bin
 CC := gcc
-CFLAGS=-Wall -g
+CFLAGS=-I. -Wall -g
 LDFLAGS=-lm -lrt
 SRC_DIRS := .
 SRCS := $(shell find $(SRC_DIRS) -maxdepth 1 -name '*.c')
