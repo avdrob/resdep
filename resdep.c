@@ -312,7 +312,6 @@ int main(int argc, char *argv[])
 	proc_num = cpus_onln;
 
 	send_to_kernel(cpus_onln, &sys_load);
-	return 0;
 
 	for (i = 0; i < proc_num; i++) {
 		proc.proc_num = proc_num;
