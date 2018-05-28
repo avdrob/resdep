@@ -45,7 +45,7 @@ enum hrtimer_restart hog_hrtimer_callback(struct hrtimer *timer)
 	struct hog_thread_data *data = container_of(timer,
 				struct hog_thread_data, hog_hrtimer);
 
-	printk(KERN_INFO "[kcpuhog]: hrtimer_callback is called\n");
+	// printk(KERN_INFO "[kcpuhog]: hrtimer_callback is called\n");
 
 	if (data->is_running) {
 		data->is_running = false;
@@ -72,22 +72,22 @@ static int hog_threadfn(void *d)
 
 	data->is_running = true;
 	while (!kthread_should_stop()) {
-		printk(KERN_INFO "[kcpuhog]: begin busyloop\n");
+		// printk(KERN_INFO "[kcpuhog]: begin busyloop\n");
 		while (data->is_running)
 			cpu_relax();
-		printk(KERN_INFO "[kcpuhog]: end busyloop\n");
+		// printk(KERN_INFO "[kcpuhog]: end busyloop\n");
 
-		printk(KERN_INFO "[kcpuhog]: begin sleep\n");
+		// printk(KERN_INFO "[kcpuhog]: begin sleep\n");
 		usleep_range(MS_TO_US(data->sleep_time_ms),
 				MS_TO_US(data->sleep_time_ms));
-		printk(KERN_INFO "[kcpuhog]: end sleep\n");
+		// printk(KERN_INFO "[kcpuhog]: end sleep\n");
 	}
 
 	printk(KERN_INFO "[kcpuhog]: Cancel timer\n");
 	if (hrtimer_cancel(&data->hog_hrtimer))
 		printk(KERN_INFO "[kcpuhog]: The timer was active\n");
 
-	printk(KERN_INFO "[kcpuhog]: Thread Stopping\n");
+	printk(KERN_INFO "[kcpuhog]: Thread %d Stopping\n", data->cpu);
 	do_exit(0);
 }
 
@@ -252,7 +252,7 @@ static void __exit kcpuhog_exit(void)
 	netlink_kernel_release(nl_sk);
 
 	for (i = 0; i < num_threads; i++)
-		if (!IS_ERR(hog_data[i].hog_thread))
+		if (hog_data[i].hog_thread && !IS_ERR(hog_data[i].hog_thread))
 			kthread_stop(hog_data[i].hog_thread);
 
 	/* Passing possible NULL to kfree is legal */
