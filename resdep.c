@@ -274,7 +274,6 @@ static void send_to_kernel(int cpus_onln, const struct sys_load *sys_load)
 				NLMSG_LENGTH(sizeof(struct nlmsgerr)), 0) < 0)
 		err_exit("recv");
 	process_ack(nlh, nlh_ack);
-	return;
 
 	/* Send all CPU loads to kernel */
 	for (i = 0; i < cpus_onln; i++) {

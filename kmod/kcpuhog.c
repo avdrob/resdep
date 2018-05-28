@@ -125,8 +125,7 @@ static void nl_recv_msg(struct sk_buff *skb)
 			printk(KERN_ERR "[kcpuhog]: kmalloc failed\n");
 			goto err_exit;
 		}
-		cpu_load = kmalloc(sizeof(struct cpu_load) * num_threads,
-					GFP_KERNEL);
+		cpu_load = kmalloc(sizeof(struct cpu_load), GFP_KERNEL);
 		if (!cpu_load) {
 			printk(KERN_ERR "[kcpuhog]: kmalloc failed\n");
 			goto free_hog_data;
@@ -135,8 +134,7 @@ static void nl_recv_msg(struct sk_buff *skb)
 		/* Everything is ok */
 		memset((void *) hog_data, 0, sizeof(struct hog_thread_data) *
 						num_threads);
-		memset((void *) cpu_load, 0, sizeof(struct cpu_load) *
-						num_threads);
+		memset((void *) cpu_load, 0, sizeof(struct cpu_load));
 	}
 	else {	/* Here we receive CPU loads */
 		unsigned int cpu_num, load_msec;
@@ -145,9 +143,9 @@ static void nl_recv_msg(struct sk_buff *skb)
 			printk(KERN_ALERT "[kcpuhog]: nlmsg sequence number "
 					"mismatch: should be %d\n", msg_rcvd + 1);
 
-		cpu_load[msg_rcvd] = *((struct cpu_load *) nlmsg_data(nlh));
-		cpu_num = cpu_load[msg_rcvd].cpu_num;
-		load_msec = cpu_load[msg_rcvd].load_msec;
+		cpu_load = (struct cpu_load *) nlmsg_data(nlh);
+		cpu_num = cpu_load->cpu_num;
+		load_msec = cpu_load->load_msec;
 
 		if (cpu_num >= num_cpus) {
 			printk(KERN_ERR "[kcpuhog]: CPU number %u is too "
@@ -165,6 +163,9 @@ static void nl_recv_msg(struct sk_buff *skb)
 			return;
 		}
 		cpus_bitmask |= 0x1 << cpu_num;
+		printk(KERN_INFO "[kcpuhog]: seq == %d, cpu_num == %u, "
+					"load_msec == %u\n", seq, cpu_num,
+					load_msec);
 
 		/* Now it's time to spawn corresponding kthread */
 		hog_data[msg_rcvd].work_time_ms = load_msec;
@@ -220,8 +221,6 @@ err_exit:
 
 static int __init kcpuhog_init(void)
 {
-	printk(KERN_INFO "[kcpuhog]: Initializing module\n");
-
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0)
 	struct netlink_kernel_cfg cfg = {
 		.input = nl_recv_msg,
@@ -231,6 +230,8 @@ static int __init kcpuhog_init(void)
 	nl_sk = netlink_kernel_create(&init_net, NETLINK_CPUHOG, 0, nl_recv_msg,
 				NULL, THIS_MODULE);
 #endif
+
+	printk(KERN_INFO "[kcpuhog]: Initializing module\n");
 
 	if (!nl_sk) {
 		printk(KERN_ALERT "[kcpuhog]: Error creating socket\n");
