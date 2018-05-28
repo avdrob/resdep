@@ -185,10 +185,6 @@ static void nl_recv_msg(struct sk_buff *skb)
 		}
 
 		msg_rcvd++;
-		if (msg_rcvd == num_threads) { /* Socket is no longer needed */
-			netlink_kernel_release(nl_sk);
-			nl_sk = NULL;	/* For safe double release */
-		}
 	}
 
 	/* Here we are sending an acknowledgement back to userspace */
@@ -209,6 +205,11 @@ static void nl_recv_msg(struct sk_buff *skb)
 
 	if (nlmsg_unicast(nl_sk, skb_out, pid) < 0)
 		printk(KERN_INFO "[kcpuhog]: Error while sending back to user\n");
+
+	if (msg_rcvd == num_threads) { /* Socket is no longer needed */
+		netlink_kernel_release(nl_sk);
+		nl_sk = NULL;	/* For safe double release */
+	}
 
 	return;
 
