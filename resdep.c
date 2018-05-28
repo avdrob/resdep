@@ -284,7 +284,7 @@ static void send_to_kernel(int cpus_onln, const struct sys_load *sys_load)
 		memcpy(NLMSG_DATA(nlh), &cpu_load, sizeof(cpu_load));
 		if (sendto(sock_fd, (void *) nlh, nlh->nlmsg_len, 0,
 					(struct sockaddr *) &dest_addr,
-					sizeof(struct sockaddr_nl) < 0))
+					sizeof(struct sockaddr_nl)) < 0)
 			err_exit("sendto");
 
 		memset(nlh_ack, 0, NLMSG_SPACE(sizeof(struct nlmsgerr)));
