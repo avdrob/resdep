@@ -299,12 +299,30 @@ static void send_to_kernel(int cpus_onln, const struct sys_load *sys_load)
     close(sock_fd);
 }
 
+static void check_kmod_is_loaded(void)
+{
+    FILE *modf = fopen("/proc/modules", "r");
+    char modname[32];
+
+    while (!feof(modf)) {
+        fscanf(modf, "%s%*[^\n]", modname);
+        if (strcmp(modname, KMOD_NAME) == 0) {
+            return;
+        }
+    }
+
+    fprintf(stderr, "Module %s is not loaded.\nTerminating.\n", KMOD_NAME);
+    exit(EXIT_FAILURE);
+}
+
 int main(int argc, char *argv[])
 {
     int i;
     int cpus_onln;
     int proc_num;
     struct sys_load sys_load = {0};
+
+    check_kmod_is_loaded();
 
     getargs(argc, argv, &sys_load);
 

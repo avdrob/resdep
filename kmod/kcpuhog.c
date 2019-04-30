@@ -46,7 +46,7 @@ enum hrtimer_restart hog_hrtimer_callback(struct hrtimer *timer)
     struct hog_thread_data *data = container_of(timer,
                 struct hog_thread_data, hog_hrtimer);
 
-    // printk(KERN_INFO "[kcpuhog]: hrtimer_callback is called\n");
+    // printk(KERN_INFO "[%s]: hrtimer_callback is called\n", KMOD_NAME);
 
     if (data->is_running) {
         data->is_running = false;
@@ -73,22 +73,22 @@ static int hog_threadfn(void *d)
 
     data->is_running = true;
     while (!kthread_should_stop()) {
-        // printk(KERN_INFO "[kcpuhog]: begin busyloop\n");
+        // printk(KERN_INFO "[%s]: begin busyloop\n", KMOD_NAME);
         while (data->is_running)
             cpu_relax();
-        // printk(KERN_INFO "[kcpuhog]: end busyloop\n");
+        // printk(KERN_INFO "[%s]: end busyloop\n", KMOD_NAME);
 
-        // printk(KERN_INFO "[kcpuhog]: begin sleep\n");
+        // printk(KERN_INFO "[%s]: begin sleep\n", KMOD_NAME);
         usleep_range(MS_TO_US(data->sleep_time_ms),
                 MS_TO_US(data->sleep_time_ms));
-        // printk(KERN_INFO "[kcpuhog]: end sleep\n");
+        // printk(KERN_INFO "[%s]: end sleep\n", KMOD_NAME);
     }
 
-    printk(KERN_INFO "[kcpuhog]: Cancel timer\n");
+    printk(KERN_INFO "[%s]: Cancel timer\n", KMOD_NAME);
     if (hrtimer_cancel(&data->hog_hrtimer))
-        printk(KERN_INFO "[kcpuhog]: The timer was active\n");
+        printk(KERN_INFO "[%s]: The timer was active\n", KMOD_NAME);
 
-    printk(KERN_INFO "[kcpuhog]: Thread %d Stopping\n", data->cpu);
+    printk(KERN_INFO "[%s]: Thread %d Stopping\n", KMOD_NAME, data->cpu);
     do_exit(0);
 }
 
@@ -103,19 +103,20 @@ static void nl_recv_msg(struct sk_buff *skb)
     pid = nlh->nlmsg_pid;
     seq = nlh->nlmsg_seq;
 
-    if (rcv_loads == false) { /* Initial receiving number of threads */
+    if (rcv_loads == false) {
+        /* Initial receiving number of threads */
         if (seq != 0)
-            printk(KERN_ALERT "[kcpuhog]: nlmsg sequence number "
-                   "mismatch: should be 0\n");
+            printk(KERN_ALERT "[%s]: nlmsg sequence number "
+                   "mismatch: should be 0\n", KMOD_NAME);
 
         num_threads = *((int *) nlmsg_data(nlh));
         if (num_threads > num_cpus) {
-            printk(KERN_ERR "[kcpuhog]: threads number %d is too "
-                   "large\n", num_threads);
+            printk(KERN_ERR "[%s]: threads number %d is too "
+                   "large\n", KMOD_NAME, num_threads);
             return;
         }
-        printk(KERN_INFO "[kcpuhog]: nl message %d; seq == %d\n",
-               num_threads, seq);
+        printk(KERN_INFO "[%s]: nl message %d; seq == %d\n",
+               KMOD_NAME, num_threads, seq);
 
         /* From now on we're going to receive CPU loads */
         rcv_loads = true;
@@ -123,12 +124,12 @@ static void nl_recv_msg(struct sk_buff *skb)
         hog_data = kmalloc(sizeof(struct hog_thread_data) * num_threads,
                            GFP_KERNEL);
         if (!hog_data) {
-            printk(KERN_ERR "[kcpuhog]: kmalloc failed\n");
+            printk(KERN_ERR "[%s]: kmalloc failed\n", KMOD_NAME);
             goto err_exit;
         }
         cpu_load = kmalloc(sizeof(struct cpu_load), GFP_KERNEL);
         if (!cpu_load) {
-            printk(KERN_ERR "[kcpuhog]: kmalloc failed\n");
+            printk(KERN_ERR "[%s]: kmalloc failed\n", KMOD_NAME);
             goto free_hog_data;
         }
 
@@ -142,30 +143,31 @@ static void nl_recv_msg(struct sk_buff *skb)
         unsigned int cpu_num, load_msec;
 
         if (seq != msg_rcvd + 1)
-            printk(KERN_ALERT "[kcpuhog]: nlmsg sequence number "
-                   "mismatch: should be %d\n", msg_rcvd + 1);
+            printk(KERN_ALERT "[%s]: nlmsg sequence number mismatch: "
+                   "should be %d\n", KMOD_NAME, msg_rcvd + 1);
 
         cpu_load = (struct cpu_load *) nlmsg_data(nlh);
         cpu_num = cpu_load->cpu_num;
         load_msec = cpu_load->load_msec;
 
         if (cpu_num >= num_cpus) {
-            printk(KERN_ERR "[kcpuhog]: CPU number %u is too large\n", cpu_num);
+            printk(KERN_ERR "[%s]: CPU number %u is too large\n",
+                   KMOD_NAME, cpu_num);
             return;
         }
         if (cpus_bitmask & (0x1 << cpu_num)) {
-            printk(KERN_ERR "[kcpuhog]: CPU number %u is already reserved\n",
-                   cpu_num);
+            printk(KERN_ERR "[%s]: CPU number %u is already reserved\n",
+                   KMOD_NAME, cpu_num);
             return;
         }
         if (load_msec > MSEC_IN_SEC) {
-            printk(KERN_ERR "[kcpuhog]: load of %u msec is too large\n",
-                   load_msec);
+            printk(KERN_ERR "[%s]: load of %u msec is too large\n",
+                   KMOD_NAME, load_msec);
             return;
         }
         cpus_bitmask |= 0x1 << cpu_num;
-        printk(KERN_INFO "[kcpuhog]: seq == %d, cpu_num == %u, "
-               "load_msec == %u\n", seq, cpu_num, load_msec);
+        printk(KERN_INFO "[%s]: seq == %d, cpu_num == %u, "
+               "load_msec == %u\n", KMOD_NAME, seq, cpu_num, load_msec);
 
         /* Now it's time to spawn corresponding kthread */
         hog_data[msg_rcvd].work_time_ms = load_msec;
@@ -175,9 +177,10 @@ static void nl_recv_msg(struct sk_buff *skb)
 
         hog_data[msg_rcvd].hog_thread = kthread_create(hog_threadfn,
                                                        &(hog_data[msg_rcvd]),
-                                                       "kcpuhog_%d", cpu_num);
+                                                       "%s_%d",
+                                                       KMOD_NAME, cpu_num);
         if (IS_ERR(hog_data[msg_rcvd].hog_thread))
-            printk(KERN_ERR "[kcpuhog]: Thread creation failed\n");
+            printk(KERN_ERR "[%s]: Thread creation failed\n", KMOD_NAME);
         else {
             kthread_bind(hog_data[msg_rcvd].hog_thread,
                          hog_data[msg_rcvd].cpu);
@@ -190,7 +193,7 @@ static void nl_recv_msg(struct sk_buff *skb)
     /* Here we are sending an acknowledgement back to userspace */
     skb_out = nlmsg_new(sizeof(struct nlmsgerr), 0);
     if (!skb_out) {
-        printk(KERN_ERR "[kcpuhog]: Failed to allocate new skb\n");
+        printk(KERN_ERR "[%s]: Failed to allocate new skb\n", KMOD_NAME);
         return;
     }
 
@@ -204,7 +207,7 @@ static void nl_recv_msg(struct sk_buff *skb)
     memcpy(nlmsg_data(nlh), (void *) &err, sizeof(struct nlmsgerr));
 
     if (nlmsg_unicast(nl_sk, skb_out, pid) < 0)
-        printk(KERN_INFO "[kcpuhog]: Error while sending back to user\n");
+        printk(KERN_INFO "[%s]: Error while sending back to user\n", KMOD_NAME);
 
     if (msg_rcvd == num_threads) {
         /* Socket is no longer needed */
@@ -233,10 +236,10 @@ static int __init kcpuhog_init(void)
                                   NULL, THIS_MODULE);
 #endif
 
-    printk(KERN_INFO "[kcpuhog]: Initializing module\n");
+    printk(KERN_INFO "[%s]: Initializing module\n", KMOD_NAME);
 
     if (!nl_sk) {
-        printk(KERN_ALERT "[kcpuhog]: Error creating socket\n");
+        printk(KERN_ALERT "[%s]: Error creating socket\n", KMOD_NAME);
         return -1;
     }
 
@@ -249,7 +252,7 @@ static void __exit kcpuhog_exit(void)
 {
     int i;
 
-    printk(KERN_INFO "[kcpuhog]: Cleaning Up\n");
+    printk(KERN_INFO "[%s]: Cleaning Up\n", KMOD_NAME);
 
     netlink_kernel_release(nl_sk);
 
