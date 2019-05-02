@@ -209,12 +209,6 @@ static void nl_recv_msg(struct sk_buff *skb)
     if (nlmsg_unicast(nl_sk, skb_out, pid) < 0)
         printk(KERN_INFO "[%s]: Error while sending back to user\n", KMOD_NAME);
 
-    if (msg_rcvd == num_threads) {
-        /* Socket is no longer needed */
-        netlink_kernel_release(nl_sk);
-        nl_sk = NULL;    /* For safe double release */
-    }
-
     return;
 
 free_hog_data:
