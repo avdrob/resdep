@@ -231,10 +231,10 @@ static void process_ack(struct nlmsghdr *nlh, struct nlmsghdr *nlh_ack)
 
 static void send_to_kernel(int cpus_onln, const struct sys_load *sys_load)
 {
-    int i, sock_fd, thr_num;
+    int i, sock_fd;
     struct sockaddr_nl src_addr, dest_addr;
     struct nlmsghdr *nlh, *nlh_ack;
-    struct cpu_load cpu_load;
+    struct nl_packet packet;
 
     /* We use netlink sockets to communicate with kernel threads.*/
     sock_fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_CPUHOG);
@@ -252,17 +252,17 @@ static void send_to_kernel(int cpus_onln, const struct sys_load *sys_load)
     dest_addr.nl_pid = 0;             /* destination == kernel */
     dest_addr.nl_groups = 0;          /* unicast */
 
-    nlh = (struct nlmsghdr *) malloc(NLMSG_SPACE(sizeof(struct cpu_load)));
-    memset(nlh, 0, NLMSG_SPACE(sizeof(struct cpu_load)));
-    nlh->nlmsg_len = NLMSG_LENGTH(sizeof(struct cpu_load));
+    nlh = (struct nlmsghdr *) malloc(NLMSG_SPACE(sizeof(struct nl_packet)));
+    memset(nlh, 0, NLMSG_SPACE(sizeof(struct nl_packet)));
+    nlh->nlmsg_len = NLMSG_LENGTH(sizeof(struct nl_packet));
     nlh->nlmsg_type = NLMSG_NOOP;
     nlh->nlmsg_flags |= NLM_F_ACK;    /* Request an ack from kernel */
     nlh->nlmsg_pid = getpid();
-
     /* Send number of threads to kernel */
-    thr_num = cpus_onln;
+    packet.packet_type = NL_THREADS_NUM;
+    packet.threads_num = cpus_onln;
     nlh->nlmsg_seq = 0;
-    memcpy(NLMSG_DATA(nlh), &thr_num, sizeof(thr_num));
+    memcpy(NLMSG_DATA(nlh), &packet, sizeof(struct nl_packet));
     if (sendto(sock_fd, (void *) nlh, nlh->nlmsg_len, 0, (struct sockaddr *)
                &dest_addr, sizeof(struct sockaddr_nl)) < 0)
         err_exit("sendto");
@@ -277,11 +277,12 @@ static void send_to_kernel(int cpus_onln, const struct sys_load *sys_load)
 
     /* Send all CPU loads to kernel */
     for (i = 0; i < cpus_onln; i++) {
-        cpu_load.cpu_num = i;
-        cpu_load.load_msec = PCT_TO_MSEC(sys_load->st);
+        packet.packet_type = NL_CPU_LOAD;
+        packet.cpu_load.cpu_num = i;
+        packet.cpu_load.load_msec = PCT_TO_MSEC(sys_load->st);
 
         nlh->nlmsg_seq++;
-        memcpy(NLMSG_DATA(nlh), &cpu_load, sizeof(cpu_load));
+        memcpy(NLMSG_DATA(nlh), &packet, sizeof(struct nl_packet));
         if (sendto(sock_fd, (void *) nlh, nlh->nlmsg_len, 0,
                    (struct sockaddr *) &dest_addr,
                    sizeof(struct sockaddr_nl)) < 0)

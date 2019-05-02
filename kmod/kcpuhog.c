@@ -32,11 +32,7 @@ static struct hog_thread_data *hog_data;
 
 static struct sock *nl_sk = NULL;
 static unsigned int msg_rcvd = 0;    /* Number of received messages */
-static bool rcv_loads = false;       /* Flag is risen when receiving actual
-                                      * CPU loads.
-                                      */
 
-static struct cpu_load *cpu_load;
 static unsigned int num_cpus = 0;
 static unsigned int num_threads = 0;
 static unsigned int cpus_bitmask = 0;
@@ -95,21 +91,25 @@ static int hog_threadfn(void *d)
 static void nl_recv_msg(struct sk_buff *skb)
 {
     struct nlmsghdr *nlh;
+    struct nl_packet *packet;
     struct sk_buff *skb_out;
     struct nlmsgerr err;
     int pid, seq;
+    unsigned int cpu_num, load_msec;
 
     nlh = (struct nlmsghdr *) skb->data;
+    packet = (struct nl_packet *) nlmsg_data(nlh);
     pid = nlh->nlmsg_pid;
     seq = nlh->nlmsg_seq;
 
-    if (rcv_loads == false) {
+    switch (packet->packet_type) {
+    case NL_THREADS_NUM:
         /* Initial receiving number of threads */
         if (seq != 0)
             printk(KERN_ALERT "[%s]: nlmsg sequence number "
                    "mismatch: should be 0\n", KMOD_NAME);
 
-        num_threads = *((int *) nlmsg_data(nlh));
+        num_threads = packet->threads_num;
         if (num_threads > num_cpus) {
             printk(KERN_ERR "[%s]: threads number %d is too "
                    "large\n", KMOD_NAME, num_threads);
@@ -118,37 +118,26 @@ static void nl_recv_msg(struct sk_buff *skb)
         printk(KERN_INFO "[%s]: nl message %d; seq == %d\n",
                KMOD_NAME, num_threads, seq);
 
-        /* From now on we're going to receive CPU loads */
-        rcv_loads = true;
-
         hog_data = kmalloc(sizeof(struct hog_thread_data) * num_threads,
                            GFP_KERNEL);
         if (!hog_data) {
             printk(KERN_ERR "[%s]: kmalloc failed\n", KMOD_NAME);
-            goto err_exit;
-        }
-        cpu_load = kmalloc(sizeof(struct cpu_load), GFP_KERNEL);
-        if (!cpu_load) {
-            printk(KERN_ERR "[%s]: kmalloc failed\n", KMOD_NAME);
-            goto free_hog_data;
+            return;
         }
 
         /* Everything is ok */
         memset((void *) hog_data, 0,
                sizeof(struct hog_thread_data) * num_threads);
-        memset((void *) cpu_load, 0, sizeof(struct cpu_load));
-    }
-    else {
-        /* Here we receive CPU loads */
-        unsigned int cpu_num, load_msec;
+        break;
 
+    case NL_CPU_LOAD:
+        /* Here we receive CPU loads */
         if (seq != msg_rcvd + 1)
             printk(KERN_ALERT "[%s]: nlmsg sequence number mismatch: "
                    "should be %d\n", KMOD_NAME, msg_rcvd + 1);
 
-        cpu_load = (struct cpu_load *) nlmsg_data(nlh);
-        cpu_num = cpu_load->cpu_num;
-        load_msec = cpu_load->load_msec;
+        cpu_num = (packet->cpu_load).cpu_num;
+        load_msec = (packet->cpu_load).load_msec;
 
         if (cpu_num >= num_cpus) {
             printk(KERN_ERR "[%s]: CPU number %u is too large\n",
@@ -188,6 +177,11 @@ static void nl_recv_msg(struct sk_buff *skb)
         }
 
         msg_rcvd++;
+        break;
+
+    default:
+        unreachable();
+        break;
     }
 
     /* Here we are sending an acknowledgement back to userspace */
@@ -209,12 +203,6 @@ static void nl_recv_msg(struct sk_buff *skb)
     if (nlmsg_unicast(nl_sk, skb_out, pid) < 0)
         printk(KERN_INFO "[%s]: Error while sending back to user\n", KMOD_NAME);
 
-    return;
-
-free_hog_data:
-    kfree(hog_data);
-    hog_data = NULL;    /* For safe double kfree */
-err_exit:
     return;
 }
 
@@ -255,7 +243,6 @@ static void __exit kcpuhog_exit(void)
             kthread_stop(hog_data[i].hog_thread);
 
     /* Passing possible NULL to kfree is legal */
-    kfree(cpu_load);
     kfree(hog_data);
 }
 
