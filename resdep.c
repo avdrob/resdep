@@ -46,7 +46,7 @@ struct proc_struct {
     pid_t pid;
 
     struct cpu_load cpu_load;  /* CPU load for particular process */
-    int is_running;            /* Flag indicating whether process is
+    volatile int is_running;   /* Flag indicating whether process is
                                 * running on CPU or sleeping
                                 */
 

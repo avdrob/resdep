@@ -1,4 +1,4 @@
-EXTRA_CFLAGS := -I$(src)/..
+EXTRA_CFLAGS := -I$(src)/.. -O2
 obj-m += kcpuhog.o
 
 all:
