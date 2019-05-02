@@ -44,19 +44,18 @@ static unsigned int cpus_bitmask = 0;
 enum hrtimer_restart hog_hrtimer_callback(struct hrtimer *timer)
 {
     struct hog_thread_data *data = container_of(timer,
-                struct hog_thread_data, hog_hrtimer);
+                                                struct hog_thread_data,
+                                                hog_hrtimer);
 
     // printk(KERN_INFO "[%s]: hrtimer_callback is called\n", KMOD_NAME);
 
     if (data->is_running) {
         data->is_running = false;
-        hrtimer_forward_now(timer,
-                ktime_set(0, MS_TO_NS(data->sleep_time_ms)));
+        hrtimer_forward_now(timer, ktime_set(0, MS_TO_NS(data->sleep_time_ms)));
     }
     else {
         data->is_running = true;
-        hrtimer_forward_now(timer,
-                ktime_set(0, MS_TO_NS(data->work_time_ms)));
+        hrtimer_forward_now(timer, ktime_set(0, MS_TO_NS(data->work_time_ms)));
     }
 
     return HRTIMER_RESTART;
@@ -68,8 +67,9 @@ static int hog_threadfn(void *d)
 
     hrtimer_init(&data->hog_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
     data->hog_hrtimer.function = hog_hrtimer_callback;
-    hrtimer_start(&data->hog_hrtimer, ktime_set(0,
-                MS_TO_NS(data->work_time_ms)), HRTIMER_MODE_REL);
+    hrtimer_start(&data->hog_hrtimer,
+                  ktime_set(0, MS_TO_NS(data->work_time_ms)),
+                  HRTIMER_MODE_REL);
 
     data->is_running = true;
     while (!kthread_should_stop()) {
@@ -80,7 +80,7 @@ static int hog_threadfn(void *d)
 
         // printk(KERN_INFO "[%s]: begin sleep\n", KMOD_NAME);
         usleep_range(MS_TO_US(data->sleep_time_ms),
-                MS_TO_US(data->sleep_time_ms));
+                     MS_TO_US(data->sleep_time_ms));
         // printk(KERN_INFO "[%s]: end sleep\n", KMOD_NAME);
     }
 
@@ -226,8 +226,8 @@ static int __init kcpuhog_init(void)
     };
     nl_sk = netlink_kernel_create(&init_net, NETLINK_CPUHOG, &cfg);
 #else
-    nl_sk = netlink_kernel_create(&init_net, NETLINK_CPUHOG, 0, nl_recv_msg,
-                                  NULL, THIS_MODULE);
+    nl_sk = netlink_kernel_create(&init_net, NETLINK_CPUHOG, 0,
+                                  nl_recv_msg, NULL, THIS_MODULE);
 #endif
 
     printk(KERN_INFO "[%s]: Initializing module\n", KMOD_NAME);
