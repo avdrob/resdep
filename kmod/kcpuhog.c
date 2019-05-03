@@ -88,18 +88,41 @@ static int hog_threadfn(void *d)
     do_exit(0);
 }
 
+static void nl_send_ack(const struct nlmsghdr *nlh)
+{
+    struct sk_buff *skb_out;
+    struct nlmsgerr err;
+
+    /* Here we are sending an acknowledgement back to userspace */
+    skb_out = nlmsg_new(sizeof(struct nlmsgerr), 0);
+    if (!skb_out) {
+        printk(KERN_ERR "[%s]: Failed to allocate new skb\n", KMOD_NAME);
+        return;
+    }
+
+    memset((void *) &err, 0, sizeof(struct nlmsgerr));
+    err.error = 0;        /* 0 for acknowledgement */
+    err.msg = *nlh;       /* header causing acknowledgment response */
+
+    /* Now nlh points to header of a new netlink message put to buffer */
+    nlh = nlmsg_put(skb_out, 0, err.msg.nlmsg_seq, NLMSG_ERROR,
+                    sizeof(struct nlmsgerr), 0);
+    NETLINK_CB(skb_out).dst_group = 0;    /* not in mcast group */
+    memcpy(nlmsg_data(nlh), (void *) &err, sizeof(struct nlmsgerr));
+
+    if (nlmsg_unicast(nl_sk, skb_out, err.msg.nlmsg_pid) < 0)
+        printk(KERN_INFO "[%s]: Error while sending back to user\n", KMOD_NAME);
+}
+
 static void nl_recv_msg(struct sk_buff *skb)
 {
     struct nlmsghdr *nlh;
     struct nl_packet *packet;
-    struct sk_buff *skb_out;
-    struct nlmsgerr err;
-    int pid, seq;
+    int seq;
     unsigned int cpu_num, load_msec;
 
     nlh = (struct nlmsghdr *) skb->data;
     packet = (struct nl_packet *) nlmsg_data(nlh);
-    pid = nlh->nlmsg_pid;
     seq = nlh->nlmsg_seq;
 
     switch (packet->packet_type) {
@@ -184,24 +207,7 @@ static void nl_recv_msg(struct sk_buff *skb)
         break;
     }
 
-    /* Here we are sending an acknowledgement back to userspace */
-    skb_out = nlmsg_new(sizeof(struct nlmsgerr), 0);
-    if (!skb_out) {
-        printk(KERN_ERR "[%s]: Failed to allocate new skb\n", KMOD_NAME);
-        return;
-    }
-
-    memset((void *) &err, 0, sizeof(struct nlmsgerr));
-    err.error = 0;        /* 0 for acknowledgement */
-    err.msg = *nlh;       /* header causing acknowledgment response */
-
-    /* Now nlh points to header of a new netlink message put to buffer */
-    nlh = nlmsg_put(skb_out, 0, seq, NLMSG_ERROR, sizeof(struct nlmsgerr), 0);
-    NETLINK_CB(skb_out).dst_group = 0;    /* not in mcast group */
-    memcpy(nlmsg_data(nlh), (void *) &err, sizeof(struct nlmsgerr));
-
-    if (nlmsg_unicast(nl_sk, skb_out, pid) < 0)
-        printk(KERN_INFO "[%s]: Error while sending back to user\n", KMOD_NAME);
+    nl_send_ack(nlh);
 
     return;
 }
