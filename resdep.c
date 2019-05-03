@@ -34,6 +34,9 @@
 /* The name this program was invoked by. */
 char *progname;
 
+/* Number of present CPUs. */
+int cpus_onln;
+
 /* Vector of system load values. Values are given in percentages: [0-100] */
 struct sys_load {
     int st;
@@ -54,6 +57,12 @@ struct proc_struct {
     int ind;                   /* Index number of process */
 };
 static struct proc_struct proc;
+
+/* Structures for communicating with the kernel. */
+static int sock_fd;
+static struct sockaddr_nl src_addr, dest_addr;
+static struct nlmsghdr *nlh, *nlh_ack;
+static struct nl_packet *packet;
 
 static struct option longopts[] = {
     {"help", no_argument, NULL, 'h'},
@@ -206,7 +215,7 @@ static void cpu_proc_func(void)
     }
 }
 
-static void process_ack(struct nlmsghdr *nlh, struct nlmsghdr *nlh_ack)
+static void process_ack(void)
 {
     if (nlh->nlmsg_seq != nlh_ack->nlmsg_seq) {
         fprintf(stderr, "Nlmsg sequence number mismatch: %d instead of "
@@ -231,73 +240,39 @@ static void process_ack(struct nlmsghdr *nlh, struct nlmsghdr *nlh_ack)
 
 static void send_to_kernel(int cpus_onln, const struct sys_load *sys_load)
 {
-    int i, sock_fd;
-    struct sockaddr_nl src_addr, dest_addr;
-    struct nlmsghdr *nlh, *nlh_ack;
-    struct nl_packet packet;
+    int i;
 
-    /* We use netlink sockets to communicate with kernel threads.*/
-    sock_fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_CPUHOG);
-    if (sock_fd < 0)
-        err_exit("socket");
-
-    memset(&src_addr, 0, sizeof(src_addr));
-    src_addr.nl_family = AF_NETLINK;
-    src_addr.nl_pid = getpid();
-    if (bind(sock_fd, (struct sockaddr *) &src_addr, sizeof(src_addr)) < 0)
-        err_exit("bind");
-
-    memset(&dest_addr, 0, sizeof(dest_addr));
-    dest_addr.nl_family = AF_NETLINK;
-    dest_addr.nl_pid = 0;             /* destination == kernel */
-    dest_addr.nl_groups = 0;          /* unicast */
-
-    nlh = (struct nlmsghdr *) malloc(NLMSG_SPACE(sizeof(struct nl_packet)));
-    memset(nlh, 0, NLMSG_SPACE(sizeof(struct nl_packet)));
-    nlh->nlmsg_len = NLMSG_LENGTH(sizeof(struct nl_packet));
-    nlh->nlmsg_type = NLMSG_NOOP;
-    nlh->nlmsg_flags |= NLM_F_ACK;    /* Request an ack from kernel */
-    nlh->nlmsg_pid = getpid();
     /* Send number of threads to kernel */
-    packet.packet_type = NL_THREADS_NUM;
-    packet.threads_num = cpus_onln;
+    packet->packet_type = NL_THREADS_NUM;
+    packet->threads_num = cpus_onln;
     nlh->nlmsg_seq = 0;
-    memcpy(NLMSG_DATA(nlh), &packet, sizeof(struct nl_packet));
     if (sendto(sock_fd, (void *) nlh, nlh->nlmsg_len, 0, (struct sockaddr *)
                &dest_addr, sizeof(struct sockaddr_nl)) < 0)
         err_exit("sendto");
 
     /* Now try to receive acknowledgement */
-    nlh_ack = (struct nlmsghdr *) malloc(NLMSG_SPACE(sizeof(struct nlmsgerr)));
-    memset(nlh_ack, 0, NLMSG_SPACE(sizeof(struct nlmsgerr)));
     if (recv(sock_fd, (void *) nlh_ack,
              NLMSG_LENGTH(sizeof(struct nlmsgerr)), 0) < 0)
         err_exit("recv");
-    process_ack(nlh, nlh_ack);
+    process_ack();
 
     /* Send all CPU loads to kernel */
     for (i = 0; i < cpus_onln; i++) {
-        packet.packet_type = NL_CPU_LOAD;
-        packet.cpu_load.cpu_num = i;
-        packet.cpu_load.load_msec = PCT_TO_MSEC(sys_load->st);
+        packet->packet_type = NL_CPU_LOAD;
+        packet->cpu_load.cpu_num = i;
+        packet->cpu_load.load_msec = PCT_TO_MSEC(sys_load->st);
 
         nlh->nlmsg_seq++;
-        memcpy(NLMSG_DATA(nlh), &packet, sizeof(struct nl_packet));
         if (sendto(sock_fd, (void *) nlh, nlh->nlmsg_len, 0,
                    (struct sockaddr *) &dest_addr,
                    sizeof(struct sockaddr_nl)) < 0)
             err_exit("sendto");
 
-        memset(nlh_ack, 0, NLMSG_SPACE(sizeof(struct nlmsgerr)));
         if (recv(sock_fd, (void *) nlh_ack,
                  NLMSG_LENGTH(sizeof(struct nlmsgerr)), 0) < 0)
             err_exit("recv");
-        process_ack(nlh, nlh_ack);
+        process_ack();
     }
-
-    free(nlh);
-    free(nlh_ack);
-    close(sock_fd);
 }
 
 static void check_kmod_is_loaded(void)
@@ -316,20 +291,57 @@ static void check_kmod_is_loaded(void)
     exit(EXIT_FAILURE);
 }
 
+static void __attribute__((constructor)) nl_init(void)
+{
+    check_kmod_is_loaded();
+    cpus_onln = sysconf(_SC_NPROCESSORS_ONLN);
+
+    /* Use netlink sockets to communicate with kernel module.*/
+    sock_fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_CPUHOG);
+    if (sock_fd < 0)
+        err_exit("socket");
+
+    /*
+     * struct sockaddr_nl {
+     *     sa_family_t     nl_family;  // AF_NETLINK
+     *     unsigned short  nl_pad;     // Zero
+     *     pid_t           nl_pid;     // Port ID (0 for kernel)
+     *     __u32           nl_groups;  // Multicast groups mask (0 for unicast)
+     * };
+     */
+    dest_addr = (struct sockaddr_nl) { AF_NETLINK, 0, 0, 0 };
+    src_addr = (struct sockaddr_nl) { AF_NETLINK, 0, getpid(), 0 };
+    if (bind(sock_fd, (struct sockaddr *) &src_addr, sizeof(src_addr)) < 0)
+        err_exit("bind");
+
+    nlh = (struct nlmsghdr *) malloc(NLMSG_SPACE(sizeof(struct nl_packet)));
+    nlh_ack = (struct nlmsghdr *) malloc(NLMSG_SPACE(sizeof(struct nlmsgerr)));
+    if (!nlh || !nlh_ack)
+        err_exit("malloc");
+
+    nlh->nlmsg_len   = NLMSG_LENGTH(sizeof(struct nl_packet));
+    nlh->nlmsg_type  = NLMSG_NOOP;
+    nlh->nlmsg_flags = NLM_F_ACK;
+    nlh->nlmsg_pid   = getpid();
+
+    packet = (struct nl_packet *) NLMSG_DATA(nlh);
+}
+
+static void __attribute__((destructor)) nl_fini(void)
+{
+    free(nlh);
+    free(nlh_ack);
+    close(sock_fd);
+}
+
 int main(int argc, char *argv[])
 {
     int i;
-    int cpus_onln;
     int proc_num;
     struct sys_load sys_load = {0};
 
-    check_kmod_is_loaded();
-
     getargs(argc, argv, &sys_load);
-
-    cpus_onln = sysconf(_SC_NPROCESSORS_ONLN);
     proc_num = cpus_onln;
-
     send_to_kernel(cpus_onln, &sys_load);
 
     for (i = 0; i < proc_num; i++) {
