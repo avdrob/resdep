@@ -114,6 +114,20 @@ static void nl_send_ack(const struct nlmsghdr *nlh)
         printk(KERN_INFO "[%s]: Error while sending back to user\n", KMOD_NAME);
 }
 
+static void nl_stop_threads(void)
+{
+    int i;
+    printk(KERN_INFO "[%s]: Stopping kthreads\n", KMOD_NAME);
+    for (i = 0; i < num_threads; i++)
+        if (hog_data[i].hog_thread && !IS_ERR(hog_data[i].hog_thread)) {
+            kthread_stop(hog_data[i].hog_thread);
+            hog_data[i].hog_thread = NULL;
+        }
+
+    kfree(hog_data);
+    hog_data = NULL;
+}
+
 static void nl_recv_msg(struct sk_buff *skb)
 {
     struct nlmsghdr *nlh;
@@ -202,6 +216,10 @@ static void nl_recv_msg(struct sk_buff *skb)
         msg_rcvd++;
         break;
 
+    case NL_STOP_THREADS:
+        nl_stop_threads();
+        break;
+
     default:
         unreachable();
         break;
@@ -243,6 +261,9 @@ static void __exit kcpuhog_exit(void)
     printk(KERN_INFO "[%s]: Cleaning Up\n", KMOD_NAME);
 
     netlink_kernel_release(nl_sk);
+
+    if (!hog_data)
+        return;
 
     for (i = 0; i < num_threads; i++)
         if (hog_data[i].hog_thread && !IS_ERR(hog_data[i].hog_thread))

@@ -329,6 +329,16 @@ static void __attribute__((constructor)) nl_init(void)
 
 static void __attribute__((destructor)) nl_fini(void)
 {
+    /* Tell kernel module to stop kthreads. */
+    packet->packet_type = NL_STOP_THREADS;
+    nlh->nlmsg_seq++;
+    if (sendto(sock_fd, (void *) nlh, nlh->nlmsg_len, 0, (struct sockaddr *)
+               &dest_addr, sizeof(struct sockaddr_nl)) < 0)
+        err_exit("sendto");
+    if (recv(sock_fd, (void *) nlh_ack,
+             NLMSG_LENGTH(sizeof(struct nlmsgerr)), 0) < 0)
+        err_exit("recv");
+
     free(nlh);
     free(nlh_ack);
     close(sock_fd);
