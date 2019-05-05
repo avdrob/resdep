@@ -19,7 +19,6 @@
 
 #define CLOCKID            CLOCK_MONOTONIC
 #define TIMER_SIG          SIGALRM
-#define CMDLINE_LENGTH     256
 
 #define err_exit(msg)           \
         do {                    \
