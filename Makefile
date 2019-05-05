@@ -1,4 +1,4 @@
-TARGET := resdep_bin
+TARGET := loadgen
 CC := gcc
 CFLAGS=-I. -Wall -g -O2
 LDFLAGS=-lm -lrt
