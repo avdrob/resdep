@@ -1,4 +1,5 @@
 TARGET := loadgen
+KMOD := kcpuhog
 CC := gcc
 CFLAGS=-I. -Wall -g -O2
 LDFLAGS=-lm -lrt
@@ -12,9 +13,13 @@ $(TARGET): $(OBJS)
 $(OBJS): $(SRCS)
 	$(CC) $(CFLAGS) -c $^ -o $@
 
+$(KMOD):
+	sh -c 'cd kmod && make'
+
 .PHONY: all clean
 
-all: $(TARGET)
+all: $(TARGET) $(KMOD)
 
 clean:
 	rm -rf $(OBJS) $(TARGET)
+	sh -c 'cd kmod && make clean'
