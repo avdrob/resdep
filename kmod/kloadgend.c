@@ -230,7 +230,7 @@ static void nl_recv_msg(struct sk_buff *skb)
     return;
 }
 
-static int __init kcpuhog_init(void)
+static int __init kloadgend_init(void)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0)
     struct netlink_kernel_cfg cfg = {
@@ -254,7 +254,7 @@ static int __init kcpuhog_init(void)
     return 0;
 }
 
-static void __exit kcpuhog_exit(void)
+static void __exit kloadgend_exit(void)
 {
     int i;
 
@@ -274,5 +274,5 @@ static void __exit kcpuhog_exit(void)
 }
 
 MODULE_LICENSE("GPL");
-module_init(kcpuhog_init);
-module_exit(kcpuhog_exit);
+module_init(kloadgend_init);
+module_exit(kloadgend_exit);
