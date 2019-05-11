@@ -21,9 +21,9 @@
 #define MS_TO_US(x)    (x * 1000)
 
 struct hog_thread_data {
+    bool cpu_active;
     struct task_struct *hog_thread;
     struct hrtimer hog_hrtimer;
-    int cpu;
     unsigned long work_time_ms;
     unsigned long sleep_time_ms;
     bool is_running;
@@ -31,19 +31,13 @@ struct hog_thread_data {
 static struct hog_thread_data *hog_data;
 
 static struct sock *nl_sk = NULL;
-static unsigned int msg_rcvd = 0;    /* Number of received messages */
-
 static unsigned int num_cpus = 0;
-static unsigned int num_threads = 0;
-static unsigned int cpus_bitmask = 0;
 
-enum hrtimer_restart hog_hrtimer_callback(struct hrtimer *timer)
+static enum hrtimer_restart hog_hrtimer_callback(struct hrtimer *timer)
 {
     struct hog_thread_data *data = container_of(timer,
                                                 struct hog_thread_data,
                                                 hog_hrtimer);
-
-    // printk(KERN_INFO "[%s]: hrtimer_callback is called\n", KMOD_NAME);
 
     if (data->is_running) {
         data->is_running = false;
@@ -69,22 +63,18 @@ static int hog_threadfn(void *d)
 
     data->is_running = true;
     while (!kthread_should_stop()) {
-        // printk(KERN_INFO "[%s]: begin busyloop\n", KMOD_NAME);
         while (data->is_running)
             cpu_relax();
-        // printk(KERN_INFO "[%s]: end busyloop\n", KMOD_NAME);
 
-        // printk(KERN_INFO "[%s]: begin sleep\n", KMOD_NAME);
         usleep_range(MS_TO_US(data->sleep_time_ms),
                      MS_TO_US(data->sleep_time_ms));
-        // printk(KERN_INFO "[%s]: end sleep\n", KMOD_NAME);
     }
 
     printk(KERN_INFO "[%s]: Cancel timer\n", KMOD_NAME);
     if (hrtimer_cancel(&data->hog_hrtimer))
         printk(KERN_INFO "[%s]: The timer was active\n", KMOD_NAME);
 
-    printk(KERN_INFO "[%s]: Thread %d Stopping\n", KMOD_NAME, data->cpu);
+    printk(KERN_INFO "[%s]: %s stopping\n", KMOD_NAME, data->hog_thread->comm);
     do_exit(0);
 }
 
@@ -114,64 +104,100 @@ static void nl_send_ack(const struct nlmsghdr *nlh)
         printk(KERN_INFO "[%s]: Error while sending back to user\n", KMOD_NAME);
 }
 
-static void nl_stop_threads(void)
+static void kloadgend_run_threads(void)
 {
     int i;
-    printk(KERN_INFO "[%s]: Stopping kthreads\n", KMOD_NAME);
-    for (i = 0; i < num_threads; i++)
-        if (hog_data[i].hog_thread && !IS_ERR(hog_data[i].hog_thread)) {
+
+    printk(KERN_INFO "[%s]: Running kthreads\n", KMOD_NAME);
+    for (i = 0; i < num_cpus; ++i) {
+        if (!hog_data[i].cpu_active)
+            continue;
+
+        hog_data[i].hog_thread = kthread_create(hog_threadfn,
+                                                &(hog_data[i]),
+                                                "%s%d", KMOD_NAME, i);
+        if (IS_ERR(hog_data[i].hog_thread))
+            printk(KERN_ERR "[%s]: Thread creation failed\n", KMOD_NAME);
+        else {
+            kthread_bind(hog_data[i].hog_thread, i);
+            wake_up_process(hog_data[i].hog_thread);
+        }
+    }
+}
+
+static void kloadgend_stop_threads(void)
+{
+    int i;
+    int cnt = 0;
+
+    if (!hog_data)
+        return;
+
+    for (i = 0; i < num_cpus; i++) {
+        if (hog_data[i].cpu_active &&
+                hog_data[i].hog_thread &&
+                !IS_ERR(hog_data[i].hog_thread)) {
             kthread_stop(hog_data[i].hog_thread);
             hog_data[i].hog_thread = NULL;
+            cnt++;
         }
+    }
 
-    kfree(hog_data);
-    hog_data = NULL;
+    if (cnt)
+        printk(KERN_INFO "[%s]: Kthreads are terminated\n", KMOD_NAME);
+}
+
+static bool nl_check_pid_and_seq(pid_t pid, pid_t prev_pid,
+                                 int seq, int prev_seq)
+{
+    if (pid != prev_pid) {
+        printk(KERN_ERR "[%s]: nlmsg pid mismatch: "
+               "should be %d, but received %d\n",
+               KMOD_NAME, prev_pid, pid);
+        return false;
+    }
+    if (seq != prev_seq + 1) {
+        printk(KERN_ERR "[%s]: nlmsg sequence number mismatch: "
+               "should be %d, but received %d\n",
+               KMOD_NAME, prev_seq + 1, seq);
+        return false;
+    }
+
+    return true;
+}
+
+static inline void reset_hog_data(void)
+{
+    memset((void *) hog_data, 0, sizeof(struct hog_thread_data) * num_cpus);
 }
 
 static void nl_recv_msg(struct sk_buff *skb)
 {
     struct nlmsghdr *nlh;
     struct nl_packet *packet;
-    int seq;
     unsigned int cpu_num, load_msec;
+
+    static pid_t pid = 0;
+    static int seq = -1;
 
     nlh = (struct nlmsghdr *) skb->data;
     packet = (struct nl_packet *) nlmsg_data(nlh);
-    seq = nlh->nlmsg_seq;
 
     switch (packet->packet_type) {
-    case NL_THREADS_NUM:
-        /* Initial receiving number of threads */
-        if (seq != 0)
-            printk(KERN_ALERT "[%s]: nlmsg sequence number "
-                   "mismatch: should be 0\n", KMOD_NAME);
-
-        num_threads = packet->threads_num;
-        if (num_threads > num_cpus) {
-            printk(KERN_ERR "[%s]: threads number %d is too "
-                   "large\n", KMOD_NAME, num_threads);
+    case NL_INIT:
+        if (nlh->nlmsg_seq != 0) {
+            printk(KERN_ERR "[%s]: nlmsg sequence number "
+                   "mismatch: should be 0, but received %d\n",
+                   KMOD_NAME, nlh->nlmsg_seq);
             return;
         }
-        printk(KERN_INFO "[%s]: nl message %d; seq == %d\n",
-               KMOD_NAME, num_threads, seq);
-
-        hog_data = kmalloc(sizeof(struct hog_thread_data) * num_threads,
-                           GFP_KERNEL);
-        if (!hog_data) {
-            printk(KERN_ERR "[%s]: kmalloc failed\n", KMOD_NAME);
-            return;
-        }
-
-        /* Everything is ok */
-        memset((void *) hog_data, 0,
-               sizeof(struct hog_thread_data) * num_threads);
         break;
 
     case NL_CPU_LOAD:
         /* Here we receive CPU loads */
-        if (seq != msg_rcvd + 1)
-            printk(KERN_ALERT "[%s]: nlmsg sequence number mismatch: "
-                   "should be %d\n", KMOD_NAME, msg_rcvd + 1);
+        if (!nl_check_pid_and_seq(nlh->nlmsg_pid, pid,
+                                  nlh->nlmsg_seq, seq))
+            return;
 
         cpu_num = (packet->cpu_load).cpu_num;
         load_msec = (packet->cpu_load).load_msec;
@@ -181,43 +207,33 @@ static void nl_recv_msg(struct sk_buff *skb)
                    KMOD_NAME, cpu_num);
             return;
         }
-        if (cpus_bitmask & (0x1 << cpu_num)) {
-            printk(KERN_ERR "[%s]: CPU number %u is already reserved\n",
-                   KMOD_NAME, cpu_num);
-            return;
-        }
         if (load_msec > MSEC_IN_SEC) {
             printk(KERN_ERR "[%s]: load of %u msec is too large\n",
                    KMOD_NAME, load_msec);
             return;
         }
-        cpus_bitmask |= 0x1 << cpu_num;
-        printk(KERN_INFO "[%s]: seq == %d, cpu_num == %u, "
-               "load_msec == %u\n", KMOD_NAME, seq, cpu_num, load_msec);
 
-        /* Now it's time to spawn corresponding kthread */
-        hog_data[msg_rcvd].work_time_ms = load_msec;
-        hog_data[msg_rcvd].sleep_time_ms =
-            MSEC_IN_SEC - hog_data[msg_rcvd].work_time_ms;
-        hog_data[msg_rcvd].cpu = cpu_num;
+        hog_data[cpu_num].work_time_ms = load_msec;
+        hog_data[cpu_num].sleep_time_ms =
+            MSEC_IN_SEC - hog_data[cpu_num].work_time_ms;
+        hog_data[cpu_num].cpu_active = true;
 
-        hog_data[msg_rcvd].hog_thread = kthread_create(hog_threadfn,
-                                                       &(hog_data[msg_rcvd]),
-                                                       "%s_%d",
-                                                       KMOD_NAME, cpu_num);
-        if (IS_ERR(hog_data[msg_rcvd].hog_thread))
-            printk(KERN_ERR "[%s]: Thread creation failed\n", KMOD_NAME);
-        else {
-            kthread_bind(hog_data[msg_rcvd].hog_thread,
-                         hog_data[msg_rcvd].cpu);
-            wake_up_process(hog_data[msg_rcvd].hog_thread);
-        }
+        break;
 
-        msg_rcvd++;
+    case NL_RUN_THREADS:
+        /* Run all threads at once. */
+        if (!nl_check_pid_and_seq(nlh->nlmsg_pid, pid,
+                                  nlh->nlmsg_seq, seq))
+            return;
+        kloadgend_run_threads();
         break;
 
     case NL_STOP_THREADS:
-        nl_stop_threads();
+        if (!nl_check_pid_and_seq(nlh->nlmsg_pid, pid,
+                                  nlh->nlmsg_seq, seq))
+            return;
+        kloadgend_stop_threads();
+        reset_hog_data();
         break;
 
     default:
@@ -225,6 +241,8 @@ static void nl_recv_msg(struct sk_buff *skb)
         break;
     }
 
+    seq = nlh->nlmsg_seq;
+    pid = nlh->nlmsg_pid;
     nl_send_ack(nlh);
 
     return;
@@ -245,31 +263,26 @@ static int __init kloadgend_init(void)
     printk(KERN_INFO "[%s]: Initializing module\n", KMOD_NAME);
 
     if (!nl_sk) {
-        printk(KERN_ALERT "[%s]: Error creating socket\n", KMOD_NAME);
+        printk(KERN_ERR "[%s]: Error creating socket\n", KMOD_NAME);
         return -1;
     }
 
     num_cpus = num_online_cpus();
+    hog_data = kmalloc(sizeof(struct hog_thread_data) * num_cpus, GFP_KERNEL);
+    if (!hog_data) {
+        printk(KERN_ERR "[%s]: kmalloc failed\n", KMOD_NAME);
+        return -1;
+    }
+    reset_hog_data();
 
     return 0;
 }
 
 static void __exit kloadgend_exit(void)
 {
-    int i;
-
     printk(KERN_INFO "[%s]: Cleaning Up\n", KMOD_NAME);
-
     netlink_kernel_release(nl_sk);
-
-    if (!hog_data)
-        return;
-
-    for (i = 0; i < num_threads; i++)
-        if (hog_data[i].hog_thread && !IS_ERR(hog_data[i].hog_thread))
-            kthread_stop(hog_data[i].hog_thread);
-
-    /* Passing possible NULL to kfree is legal */
+    kloadgend_stop_threads();
     kfree(hog_data);
 }
 

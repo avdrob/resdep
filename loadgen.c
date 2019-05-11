@@ -242,8 +242,7 @@ static void send_to_kernel(int cpus_onln, const struct sys_load *sys_load)
     int i;
 
     /* Send number of threads to kernel */
-    packet->packet_type = NL_THREADS_NUM;
-    packet->threads_num = cpus_onln;
+    packet->packet_type = NL_INIT;
     nlh->nlmsg_seq = 0;
     if (sendto(sock_fd, (void *) nlh, nlh->nlmsg_len, 0, (struct sockaddr *)
                &dest_addr, sizeof(struct sockaddr_nl)) < 0)
@@ -272,6 +271,19 @@ static void send_to_kernel(int cpus_onln, const struct sys_load *sys_load)
             err_exit("recv");
         process_ack();
     }
+
+    /* Tell kernel module to run kthreads. */
+    packet->packet_type = NL_RUN_THREADS;
+    nlh->nlmsg_seq++;
+    if (sendto(sock_fd, (void *) nlh, nlh->nlmsg_len, 0,
+               (struct sockaddr *) &dest_addr,
+               sizeof(struct sockaddr_nl)) < 0)
+        err_exit("sendto");
+
+    if (recv(sock_fd, (void *) nlh_ack,
+             NLMSG_LENGTH(sizeof(struct nlmsgerr)), 0) < 0)
+        err_exit("recv");
+    process_ack();
 }
 
 static void check_kmod_is_loaded(void)
@@ -352,6 +364,7 @@ int main(int argc, char *argv[])
     getargs(argc, argv, &sys_load);
     proc_num = cpus_onln;
     send_to_kernel(cpus_onln, &sys_load);
+    pause();
 
     for (i = 0; i < proc_num; i++) {
         proc.proc_num = proc_num;

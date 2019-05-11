@@ -14,14 +14,12 @@ struct cpu_load {
 struct nl_packet {
     /* Helps kernel module to determine which action to perform. */
     enum {
-        NL_THREADS_NUM,
+        NL_INIT,
         NL_CPU_LOAD,
+        NL_RUN_THREADS,
         NL_STOP_THREADS
     } packet_type;
-    union {
-        int threads_num;
-        struct cpu_load cpu_load;
-    };
+    struct cpu_load cpu_load;
 };
 
 #endif	/* CPU_NL_H */
