@@ -2,7 +2,7 @@
 #define CPU_NL_H
 
 #define KMOD_NAME       "kloadgend"
-#define NETLINK_CPUHOG  31
+#define NETLINK_LOADGEN  31
 
 /* CPU load argument for both user processes & kernel threads */
 struct cpu_load {

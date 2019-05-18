@@ -254,9 +254,9 @@ static int __init kloadgend_init(void)
     struct netlink_kernel_cfg cfg = {
         .input = nl_recv_msg,
     };
-    nl_sk = netlink_kernel_create(&init_net, NETLINK_CPUHOG, &cfg);
+    nl_sk = netlink_kernel_create(&init_net, NETLINK_LOADGEN, &cfg);
 #else
-    nl_sk = netlink_kernel_create(&init_net, NETLINK_CPUHOG, 0,
+    nl_sk = netlink_kernel_create(&init_net, NETLINK_LOADGEN, 0,
                                   nl_recv_msg, NULL, THIS_MODULE);
 #endif
 
