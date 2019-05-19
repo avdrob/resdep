@@ -1,0 +1,40 @@
+#include <unistd.h>
+#include <sys/mman.h>
+#include <math.h>
+#include <stdio.h>
+
+static long page_size = -1;
+static long phys_pages = -1;
+
+static inline int roundd(double num)
+{
+    return num > 0 ? num + 0.5 : num - 0.5;
+}
+
+void touch_mem(unsigned char *mem, size_t len)
+{
+    unsigned char *p;
+    for (p = mem; p < mem + len; p += page_size)
+        *p = '\n';
+}
+
+int main()
+{
+    size_t len, page_cnt;
+    double pmem = 15.0;
+    unsigned char *mem = 0;
+
+    page_size = sysconf(_SC_PAGE_SIZE);
+    phys_pages = sysconf(_SC_PHYS_PAGES);
+
+    page_cnt = roundd(phys_pages * (pmem / 100.0));
+    len = page_cnt * page_size;
+
+    mem = mmap(0, len, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    fork();
+    touch_mem(mem, len);
+    printf("Done: %p\n", mem); fflush(stdout);
+    pause();
+
+    return 0;
+}

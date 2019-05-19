@@ -14,7 +14,7 @@
 #include <linux/sched/types.h>
 #endif
 
-#include "cpu_nl.h"
+#include "loadgen_netlink.h"
 
 #define MSEC_IN_SEC    1000
 #define MS_TO_NS(x)    (x * 1000000)
@@ -174,16 +174,16 @@ static inline void reset_hog_data(void)
 static void nl_recv_msg(struct sk_buff *skb)
 {
     struct nlmsghdr *nlh;
-    struct nl_packet *packet;
+    struct loadgen_packet_nl *nl_packet;
     unsigned int cpu_num, load_msec;
 
     static pid_t pid = 0;
     static int seq = -1;
 
     nlh = (struct nlmsghdr *) skb->data;
-    packet = (struct nl_packet *) nlmsg_data(nlh);
+    nl_packet = (struct loadgen_packet_nl *) nlmsg_data(nlh);
 
-    switch (packet->packet_type) {
+    switch (nl_packet->packet_type) {
     case NL_INIT:
         if (nlh->nlmsg_seq != 0) {
             printk(KERN_ERR "[%s]: nlmsg sequence number "
@@ -191,6 +191,7 @@ static void nl_recv_msg(struct sk_buff *skb)
                    KMOD_NAME, nlh->nlmsg_seq);
             return;
         }
+        reset_hog_data();
         break;
 
     case NL_CPU_LOAD:
@@ -199,8 +200,8 @@ static void nl_recv_msg(struct sk_buff *skb)
                                   nlh->nlmsg_seq, seq))
             return;
 
-        cpu_num = (packet->cpu_load).cpu_num;
-        load_msec = (packet->cpu_load).load_msec;
+        cpu_num = (nl_packet->cpu_load).cpu_num;
+        load_msec = (nl_packet->cpu_load).load_msec;
 
         if (cpu_num >= num_cpus) {
             printk(KERN_ERR "[%s]: CPU number %u is too large\n",
@@ -220,7 +221,7 @@ static void nl_recv_msg(struct sk_buff *skb)
 
         break;
 
-    case NL_RUN_THREADS:
+    case NL_RUN:
         /* Run all threads at once. */
         if (!nl_check_pid_and_seq(nlh->nlmsg_pid, pid,
                                   nlh->nlmsg_seq, seq))
@@ -228,7 +229,7 @@ static void nl_recv_msg(struct sk_buff *skb)
         kloadgend_run_threads();
         break;
 
-    case NL_STOP_THREADS:
+    case NL_STOP:
         if (!nl_check_pid_and_seq(nlh->nlmsg_pid, pid,
                                   nlh->nlmsg_seq, seq))
             return;

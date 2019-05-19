@@ -1,25 +1,95 @@
-TARGET := loadgen
-KMOD := kloadgend
-CC := gcc
-CFLAGS=-I. -Wall -g -O2
-LDFLAGS=-lm -lrt
-SRC_DIRS := .
-SRCS := $(shell find $(SRC_DIRS) -maxdepth 1 -name '*.c')
-OBJS := $(addsuffix .o, $(basename $(SRCS)))
+.POSIX:
 
-$(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) $(OBJS) -o $@ $(LDFLAGS)
+INCLUDE   = $(PWD)/include
+SRC       = $(PWD)/src
+LOADGEND  = $(SRC)/loadgend
+KLOADGEND = $(SRC)/kloadgend
+OBJ       = $(PWD)/obj
+PREFIX    = /usr/local
+CC        = gcc
+CXX       = g++
+CFLAGS    = -O2 -g
+CXXFLAGS  = $(CFLAGS)
+CPPFLAGS  = -DLOADGEND_SOURCE=1  -I$(INCLUDE)
+LDFLAGS   = -lpthread -lrt -lm
 
-$(OBJS): $(SRCS)
-	$(CC) $(CFLAGS) -c $^ -o $@
+all: loadgend kloadgend
+loadgend: $(OBJ)/loadgend
+kloadgend: $(OBJ)/kloadgend.ko
 
-$(KMOD):
-	sh -c 'cd kmod && make'
+$(OBJ)/loadgend: $(OBJ)/loadgend.o $(OBJ)/loadgen_sysload.o \
+                 $(OBJ)/loadgen_unix.o $(OBJ)/loadgen_netlink.o \
+                 $(OBJ)/loadgen_thread.o
+	@ mkdir -p $(OBJ)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(OBJ)/loadgend.o \
+		$(OBJ)/loadgen_sysload.o $(OBJ)/loadgen_unix.o \
+        $(OBJ)/loadgen_netlink.o $(OBJ)/loadgen_thread.o $(LDFLAGS)
 
-.PHONY: all clean
+$(OBJ)/loadgend.o: $(LOADGEND)/loadgend.c \
+                   $(INCLUDE)/loadgen_sysload.h \
+                   $(INCLUDE)/loadgen_conf.h \
+                   $(INCLUDE)/loadgen_log.h \
+                   $(INCLUDE)/loadgen_thread.h \
+                   $(INCLUDE)/loadgen_unix.h \
+                   $(INCLUDE)/loadgen_netlink.h \
+                   $(INCLUDE)/loadgen_cpuload.h
+	@ mkdir -pv $(OBJ)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
-all: $(TARGET) $(KMOD)
+$(OBJ)/loadgen_sysload.o: $(LOADGEND)/loadgen_sysload.c \
+                          $(INCLUDE)/loadgen_sysload.h \
+                          $(INCLUDE)/loadgen_log.h
+	@ mkdir -pv $(OBJ)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(OBJ)/loadgen_thread.o: $(LOADGEND)/loadgen_thread.c \
+                         $(INCLUDE)/loadgen_sysload.h \
+                         $(INCLUDE)/loadgen_thread.h \
+                         $(INCLUDE)/loadgen_log.h
+	@ mkdir -pv $(OBJ)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(OBJ)/loadgen_unix.o: $(LOADGEND)/loadgen_unix.c \
+                       $(INCLUDE)/loadgen_sysload.h \
+                       $(INCLUDE)/loadgen_unix.h \
+                       $(INCLUDE)/loadgen_netlink.h \
+                       $(INCLUDE)/loadgen_log.h \
+                       $(INCLUDE)/loadgen_thread.h \
+                       $(INCLUDE)/loadgen_cpuload.h
+	@ mkdir -pv $(OBJ)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(OBJ)/loadgen_netlink.o: $(LOADGEND)/loadgen_netlink.c \
+                          $(INCLUDE)/loadgen_log.h \
+                          $(INCLUDE)/loadgen_sysload.h \
+                          $(INCLUDE)/loadgen_netlink.h \
+                          $(INCLUDE)/loadgen_cpuload.h
+	@ mkdir -pv $(OBJ)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(OBJ)/kloadgend.ko: $(KLOADGEND)/kloadgend.c $(INCLUDE)/loadgen_netlink.h \
+                     $(INCLUDE)/loadgen_cpuload.h
+	@ mkdir -pv $(OBJ)
+	@ touch $(OBJ)/Makefile
+	@ cd $(KLOADGEND) && make
+
+install: loadgend kloadgend
+	@ mkdir -pv $(DESTDIR)$(PREFIX)/bin
+	@ mkdir -pv $(DESTDIR)/lib/modules/`uname -r`
+	@ ln -svf $(OBJ)/loadgend $(DESTDIR)$(PREFIX)/bin/loadgend
+	@ ln -svf $(OBJ)/kloadgend.ko $(DESTDIR)/lib/modules/`uname -r`
+
+uninstall:
+	@ rm -vf $(DESTDIR)$(PREFIX)/bin/loadgend
+	@ rm -vf $(DESTDIR)/lib/modules/`uname -r`
 
 clean:
-	rm -rf $(OBJS) $(TARGET)
-	sh -c 'cd kmod && make clean'
+	@ if test -d $(OBJ); then \
+		touch $(OBJ)/Makefile; \
+		cd $(KLOADGEND) && make clean; \
+	fi
+	@ rm -vf $(OBJ)/loadgend $(OBJ)/loadgend.o $(OBJ)/loadgen_thread.o \
+		$(OBJ)/loadgen_unix.o $(OBJ)/Makefile
+
+distclean:
+	@ rm -rfv $(OBJ)
