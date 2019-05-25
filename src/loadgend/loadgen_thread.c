@@ -87,6 +87,26 @@ static void loadgen_cpu_thread_switch_state(int signo)
     is_running[SIG_TO_IND(signo)] = 0;
 }
 
+void detect_mem_borders(int thread_index, unsigned char **mem_begin,
+                        unsigned char **mem_end)
+{
+    int mem_pages, per_thread, offset;
+    int page_begin, page_end;
+
+    mem_pages = cur_sysload->mem_pages_num;
+    while ((mem_pages % cpus_onln) != 0)
+        mem_pages++;
+    per_thread = mem_pages / cpus_onln;
+    offset = cur_sysload->mem_pages_num - mem_pages;
+    page_begin = offset + thread_index * per_thread;
+    if (page_begin < 0)
+        page_begin = 0;
+    page_end = offset + (thread_index + 1) * per_thread;
+
+    *mem_begin = loadgen_mem + page_begin * page_size;
+    *mem_end = loadgen_mem + page_end * page_size;
+}
+
 void *loadgen_cpu_thread_fn(void *arg)
 {
     int ret;
@@ -100,10 +120,13 @@ void *loadgen_cpu_thread_fn(void *arg)
     timer_t timerid;
     struct itimerspec work_its;
     struct timespec sleep_ts;
+    unsigned char *mem_begin, *mem_end, *p;
 
     cpu_load = (struct cpu_load *) arg;
     thread_index = cpu_load->cpu_num;
     load_msec = cpu_load->load_msec;
+
+    detect_mem_borders(thread_index, &mem_begin, &mem_end);
 
     /* Set CPU affinity. */
     CPU_ZERO(&cpu_set);
@@ -144,10 +167,13 @@ void *loadgen_cpu_thread_fn(void *arg)
     sleep_ts.tv_nsec = NSEC_PER_SEC - work_its.it_value.tv_nsec;
 
     is_running[thread_index] = 1;
+    p = mem_begin;
     while (1) {
         timer_settime(timerid, 0, &work_its, NULL);
-        while (is_running[thread_index])
-            sqrt(time(NULL));
+        while (is_running[thread_index]) {
+            *p = sqrt((long int) p);
+            p = p < mem_end ? p + page_size : mem_begin;
+        }
         clock_nanosleep(LOADGEN_THREAD_CLOCKID, 0, &sleep_ts, NULL);
         is_running[thread_index] = 1;
     }

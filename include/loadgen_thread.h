@@ -17,6 +17,9 @@ extern int *is_running;
 /* Total number of threads running. */
 extern int loadgen_threads_num;
 
+/* Number of running CPU threads. */
+extern int loadgen_cpu_threads_num;
+
 /* Use this to run threads in detached state. */
 pthread_attr_t pthread_attr;
 
