@@ -1,10 +1,10 @@
 .POSIX:
 
-INCLUDE   = $(PWD)/include
-SRC       = $(PWD)/src
+INCLUDE   = $(CURDIR)/include
+SRC       = $(CURDIR)/src
 LOADGEND  = $(SRC)/loadgend
 KLOADGEND = $(SRC)/kloadgend
-OBJ       = $(PWD)/obj
+OBJ       = $(CURDIR)/obj
 PREFIX    = /usr/local
 CC        = gcc
 CXX       = g++
@@ -81,7 +81,7 @@ install: loadgend kloadgend
 
 uninstall:
 	@ rm -vf $(DESTDIR)$(PREFIX)/bin/loadgend
-	@ rm -vf $(DESTDIR)/lib/modules/`uname -r`
+	@ rm -vf $(DESTDIR)/lib/modules/`uname -r`/kloadgend.ko
 
 clean:
 	@ if test -d $(OBJ); then \
