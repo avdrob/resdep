@@ -26,12 +26,6 @@
 #include "loadgen_netlink.h"
 #include "loadgen_thread.h"
 
-#define err_exit(msg)           \
-        do {                    \
-            perror(msg);        \
-            exit(EXIT_FAILURE); \
-        } while (0)
-
 /* The name this program was invoked by. */
 char *progname;
 

@@ -52,6 +52,12 @@ static inline void perror_r(const char *msg)
     fprintf(stderr, "%s: %s\n", msg, err_buf);
 }
 
+#define err_exit(msg)                                       \
+        do {                                                \
+            perror(msg);                                    \
+            exit(EXIT_FAILURE);                             \
+        } while (0)
+
 #define log(msg)                                            \
         do {                                                \
             update_timestamp();                             \
