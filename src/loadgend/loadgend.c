@@ -71,7 +71,7 @@ static void check_no_instance_running(void)
 
 static void loadgend_startup_checks(void)
 {
-    // check_kmod_is_loaded();
+    check_kmod_is_loaded();
     check_no_instance_running();
 }
 

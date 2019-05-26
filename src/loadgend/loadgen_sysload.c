@@ -7,14 +7,15 @@ int cpus_onln = -1;
 int page_size = -1;
 int phys_pages = -1;
 
-struct loadgen_sysload *cur_sysload = NULL, *new_sysload = NULL;
-unsigned char *loadgen_mem = NULL;
-struct cpu_load *cpu_loads = NULL;
-
 static struct loadgen_sysload loadgen_sysload[2] = {
                                   {NULL, NULL, 0},
                                   {NULL, NULL, 0}
                               };
+
+struct loadgen_sysload *cur_sysload = &(loadgen_sysload[0]);
+struct loadgen_sysload *new_sysload = &(loadgen_sysload[1]);
+unsigned char *loadgen_mem = NULL;
+struct cpu_load *cpu_loads = NULL;
 
 void loadgen_sysload_init(void)
 {
