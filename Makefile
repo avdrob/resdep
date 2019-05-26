@@ -4,6 +4,7 @@ INCLUDE   = $(CURDIR)/include
 SRC       = $(CURDIR)/src
 LOADGEND  = $(SRC)/loadgend
 KLOADGEND = $(SRC)/kloadgend
+LOADGENCTL= $(SRC)/loadgenctl
 OBJ       = $(CURDIR)/obj
 PREFIX    = /usr/local
 CC        = gcc
@@ -13,9 +14,10 @@ CXXFLAGS  = $(CFLAGS)
 CPPFLAGS  = -DLOADGEND_SOURCE=1  -I$(INCLUDE)
 LDFLAGS   = -lpthread -lrt -lm
 
-all: loadgend kloadgend
+all: loadgend kloadgend loadgenctl
 loadgend: $(OBJ)/loadgend
 kloadgend: $(OBJ)/kloadgend.ko
+loadgenctl: $(OBJ)/loadgenctl
 
 $(OBJ)/loadgend: $(OBJ)/loadgend.o $(OBJ)/loadgen_sysload.o \
                  $(OBJ)/loadgen_unix.o $(OBJ)/loadgen_netlink.o \
@@ -72,6 +74,12 @@ $(OBJ)/kloadgend.ko: $(KLOADGEND)/kloadgend.c $(INCLUDE)/loadgen_netlink.h \
 	@ mkdir -pv $(OBJ)
 	@ touch $(OBJ)/Makefile
 	@ cd $(KLOADGEND) && make
+
+$(OBJ)/loadgenctl: $(LOADGENCTL)/loadgenctl.cc \
+                   $(INCLUDE)/loadgen_conf.h \
+                   $(INCLUDE)/loadgen_unix.h
+	@ mkdir -pv $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $<
 
 install: loadgend kloadgend
 	@ mkdir -pv $(DESTDIR)$(PREFIX)/bin
