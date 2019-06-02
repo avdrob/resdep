@@ -1,6 +1,17 @@
 #ifndef LOADGEN_UNIX_H
 #define LOADGEN_UNIX_H
 
+enum un_packet_type {
+    UN_INIT,
+    UN_CPU_USER,
+    UN_CPU_KERNEL,
+    UN_MEM,
+    UN_RUN,
+    UN_STOP,
+    UN_ERR,
+    UN_OK
+};
+
 struct loadgen_packet_un {
     union {
         struct {
@@ -9,16 +20,7 @@ struct loadgen_packet_un {
         };
         char errmsg[64];
     };
-    enum {
-        UN_INIT,
-        UN_CPU_USER,
-        UN_CPU_KERNEL,
-        UN_MEM,
-        UN_RUN,
-        UN_STOP,
-        UN_ERR,
-        UN_OK
-    } packet_type;
+    enum un_packet_type packet_type;
 };
 
 #ifdef LOADGEND_SOURCE

@@ -4,7 +4,7 @@ INCLUDE   = $(CURDIR)/include
 SRC       = $(CURDIR)/src
 LOADGEND  = $(SRC)/loadgend
 KLOADGEND = $(SRC)/kloadgend
-LOADGENCTL= $(SRC)/loadgenctl
+TOOLS     = $(SRC)/tools
 OBJ       = $(CURDIR)/obj
 PREFIX    = /usr/local
 CC        = gcc
@@ -14,10 +14,11 @@ CXXFLAGS  = $(CFLAGS)
 CPPFLAGS  = -DLOADGEND_SOURCE=1  -I$(INCLUDE)
 LDFLAGS   = -lpthread -lrt -lm
 
-all: loadgend kloadgend loadgenctl
+all: loadgend kloadgend loadgenctl measurer
 loadgend: $(OBJ)/loadgend
 kloadgend: $(OBJ)/kloadgend.ko
 loadgenctl: $(OBJ)/loadgenctl
+measurer: $(OBJ)/measurer
 
 $(OBJ)/loadgend: $(OBJ)/loadgend.o $(OBJ)/loadgen_sysload.o \
                  $(OBJ)/loadgen_unix.o $(OBJ)/loadgen_netlink.o \
@@ -75,9 +76,13 @@ $(OBJ)/kloadgend.ko: $(KLOADGEND)/kloadgend.c $(INCLUDE)/loadgen_netlink.h \
 	@ touch $(OBJ)/Makefile
 	@ cd $(KLOADGEND) && make
 
-$(OBJ)/loadgenctl: $(LOADGENCTL)/loadgenctl.cc \
+$(OBJ)/loadgenctl: $(TOOLS)/loadgenctl.cc \
                    $(INCLUDE)/loadgen_conf.h \
                    $(INCLUDE)/loadgen_unix.h
+	@ mkdir -pv $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $<
+
+$(OBJ)/measurer: $(TOOLS)/measurer.cc
 	@ mkdir -pv $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $<
 
@@ -97,7 +102,8 @@ clean:
 		cd $(KLOADGEND) && make clean; \
 	fi
 	@ rm -vf $(OBJ)/loadgend $(OBJ)/loadgend.o $(OBJ)/loadgen_thread.o \
-		$(OBJ)/loadgen_unix.o $(OBJ)/Makefile
+             $(OBJ)/loadgen_unix.o $(OBJ)/loadgenctl $(OBJ)/measurer \
+             $(OBJ)/Makefile
 
 distclean:
 	@ rm -rfv $(OBJ)
