@@ -277,10 +277,14 @@ int main(int argc, char *argv[])
     cpu_measurer cm;
     disk_measurer dm;
     memory_measurer mm;
+    unsigned long long itv;
 
     measure({&tm, &cm, &dm, &mm});
+    itv = tm.get_interval();
 
-    unsigned long long itv = tm.get_interval();
+    cout.precision(2);
+    cout << fixed;
+
     cout << "Uptime: " << itv << endl;
     cout << "User%: " << cm.get_user_percent() << endl;
     cout << "System%: " << cm.get_system_percent() << endl;
