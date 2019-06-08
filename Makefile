@@ -1,4 +1,5 @@
 .POSIX:
+.SUFFIXES:
 
 INCLUDE   = $(CURDIR)/include
 SRC       = $(CURDIR)/src
@@ -10,7 +11,7 @@ PREFIX    = /usr/local
 CC        = gcc
 CXX       = g++
 CFLAGS    = -O2 -g
-CXXFLAGS  = $(CFLAGS)
+CXXFLAGS  = -std=c++11 $(CFLAGS)
 CPPFLAGS  = -DLOADGEND_SOURCE=1  -I$(INCLUDE)
 LDFLAGS   = -lpthread -lrt -lm
 

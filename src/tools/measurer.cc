@@ -2,6 +2,10 @@
 #include <fstream>
 #include <vector>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+
 #include <sched.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -126,7 +130,12 @@ private:
 
 class disk_measurer : public measurer {
 public:
-    disk_measurer() : measurer("/proc/diskstats"), diskstat{{0}, {0}} {}
+    disk_measurer() : measurer("/proc/diskstats"), diskstat{{0}, {0}}
+    {
+        struct stat statbuf = {0};
+        stat("/", &statbuf);
+        root_major = major(statbuf.st_dev);
+    }
 
     double get_util_percent(unsigned long long itv) const
     {
@@ -152,17 +161,27 @@ private:
     };
     io_stats diskstat[2];
 
+    int root_major;
+
     virtual void internal_measure() override
     {
         static unsigned int major, minor;
         static char devname[64];
         io_stats &stat = diskstat[current];
 
-        finput >> major >> minor >> devname >>
-			      stat.rd_ios >> stat.rd_merges >> stat.rd_sectors >>
-                  stat.rd_ticks >> stat.wr_ios >> stat.wr_merges >>
-                  stat.wr_sectors >> stat.wr_ticks >> stat.ios_pgr >>
-                  stat.tot_ticks >> stat.rq_ticks;
+        while (!finput.eof()) {
+            finput >> major >> minor;
+            if (!(major == root_major && minor == 0)) {
+                finput.ignore(256, '\n');
+                continue;
+            }
+            finput >> devname >>
+                      stat.rd_ios >> stat.rd_merges >> stat.rd_sectors >>
+                      stat.rd_ticks >> stat.wr_ios >> stat.wr_merges >>
+                      stat.wr_sectors >> stat.wr_ticks >> stat.ios_pgr >>
+                      stat.tot_ticks >> stat.rq_ticks;
+            return;
+        }
     }
 };
 
