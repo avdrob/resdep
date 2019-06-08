@@ -172,9 +172,9 @@ void *loadgen_cpu_thread_fn(void *arg)
     while (1) {
         timer_settime(timerid, 0, &work_its, NULL);
         while (is_running[thread_index]) {
-            // *p = sqrt((long int) p);
-            // p = p < mem_end ? p + page_size : mem_begin;
-            sqrt(time(NULL));
+            if ((long int) p % page_size == 0)
+                *p = sqrt((long int) p);
+            p = p < mem_end - 1 ? p + 1 : mem_begin;
         }
         clock_nanosleep(LOADGEN_THREAD_CLOCKID, 0, &sleep_ts, NULL);
         is_running[thread_index] = 1;
