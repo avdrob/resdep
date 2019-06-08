@@ -54,7 +54,7 @@ public:
 
     void init() const
     {
-        static struct loadgen_packet_un un_packet = { .packet_type = UN_INIT };
+        static struct loadgen_packet_un un_packet = {{0}, UN_INIT};
         internal_send(un_packet);
     }
 
@@ -75,13 +75,13 @@ public:
 
     void run() const
     {
-        static struct loadgen_packet_un un_packet = { .packet_type = UN_RUN };
+        static struct loadgen_packet_un un_packet = {{0}, UN_RUN};
         internal_send(un_packet);
     }
 
     void stop() const
     {
-        static struct loadgen_packet_un un_packet = { .packet_type = UN_STOP };
+        static struct loadgen_packet_un un_packet = {{0}, UN_STOP};
         internal_send(un_packet);
     }
 
