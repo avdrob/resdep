@@ -32,6 +32,9 @@ extern struct loadgen_sysload *cur_sysload, *new_sysload;
 /* Memory chunk allocated by daemon. */
 extern unsigned char *loadgen_mem;
 
+/* Block device name. */
+extern char devname[];
+
 extern void loadgen_sysload_init(void);
 extern void swap_sysloads(void);
 extern void reset_sysload(struct loadgen_sysload *sysload);
@@ -39,6 +42,7 @@ extern int loadgen_sysload_empty(struct loadgen_sysload *sysload);
 extern int loadgen_cpuload_empty(struct cpu_load *cpu_load);
 extern void deallocate_memory(void);
 extern void allocate_memory(void);
+extern void get_block_devname();
 
 static inline int roundff(float num)
 {

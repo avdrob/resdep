@@ -1,4 +1,8 @@
 #include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+#include <unistd.h>
 
 #include "loadgen_sysload.h"
 #include "loadgen_log.h"
@@ -16,6 +20,7 @@ struct loadgen_sysload *cur_sysload = &(loadgen_sysload[0]);
 struct loadgen_sysload *new_sysload = &(loadgen_sysload[1]);
 unsigned char *loadgen_mem = NULL;
 struct cpu_load *cpu_loads = NULL;
+char devname[64] = "/dev/";
 
 void loadgen_sysload_init(void)
 {
@@ -23,6 +28,9 @@ void loadgen_sysload_init(void)
     cpus_onln = sysconf(_SC_NPROCESSORS_ONLN);
     page_size = sysconf(_SC_PAGE_SIZE);
     phys_pages = sysconf(_SC_PHYS_PAGES);
+
+    /* Get block device. */
+    get_block_devname();
 
     /* Init loadgen_sysload fields. */
     cpu_loads = malloc(4 * cpus_onln * sizeof(*cpu_loads));
@@ -92,4 +100,30 @@ void allocate_memory(void)
                        PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
     if (loadgen_mem == MAP_FAILED)
         log_exit("mmap");
+}
+
+void get_block_devname(void)
+{
+    int root_major = -1;
+    int root_minor = 0;
+    struct stat statbuf = {0};
+    FILE *diskfp;
+    int major, minor;
+
+    if (stat("/", &statbuf) < 0)
+        log_exit("stat");
+    root_major = major(statbuf.st_dev);
+
+    diskfp = fopen("/proc/diskstats", "r");
+    if (diskfp == NULL)
+        log_exit("fopen");
+
+    while (!feof(diskfp)) {
+        fscanf(diskfp, "%d%d%s%*[^\n]", &major, &minor, devname + 5);
+        if (major == root_major && minor == root_minor)
+            return;
+    }
+
+    fprintf(stderr, "Couldn't resolve block device name.\nTerminating.\n");
+    exit(EXIT_FAILURE);
 }
