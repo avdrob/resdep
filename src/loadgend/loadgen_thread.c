@@ -122,6 +122,7 @@ void *loadgen_cpu_thread_fn(void *arg)
     struct itimerspec work_its;
     struct timespec sleep_ts;
     unsigned char *mem_begin, *mem_end, *p;
+    int fst_iter;
 
     cpu_load = (struct cpu_load *) arg;
     thread_index = cpu_load->cpu_num;
@@ -169,12 +170,21 @@ void *loadgen_cpu_thread_fn(void *arg)
 
     is_running[thread_index] = 1;
     p = mem_begin;
+    fst_iter = 1;
     while (1) {
         timer_settime(timerid, 0, &work_its, NULL);
         while (is_running[thread_index]) {
             if ((long int) p % page_size == 0)
                 *p = sqrt((long int) p);
-            p = p < mem_end - 1 ? p + 1 : mem_begin;
+            if (!fst_iter)
+                p = p < mem_end - 1 ? p + 1 : mem_begin;
+            else
+                if (p + page_size + 1 < mem_end)
+                    p += page_size;
+                else {
+                    fst_iter = 0;
+                    p = mem_begin;
+                }
         }
         clock_nanosleep(LOADGEN_THREAD_CLOCKID, 0, &sleep_ts, NULL);
         is_running[thread_index] = 1;
