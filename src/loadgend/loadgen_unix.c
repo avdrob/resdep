@@ -108,6 +108,10 @@ static void process_packet(int un_data_sock_fd,
         CHECK_PERCENT_VALUE;
         new_sysload->mem_pages_num = percent_to_pages_num(percent);
         break;
+    case UN_IO:
+        CHECK_PERCENT_VALUE;
+        new_sysload->io_msec = percent_to_msec(percent);
+        break;
     case UN_RUN:
         if (loadgen_sysload_empty(new_sysload))
             PROCESS_PACKET_ERR("%s", "no system load specified");

@@ -6,6 +6,7 @@ enum un_packet_type {
     UN_CPU_USER,
     UN_CPU_KERNEL,
     UN_MEM,
+    UN_IO,
     UN_RUN,
     UN_STOP,
     UN_ERR,

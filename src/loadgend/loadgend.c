@@ -59,7 +59,7 @@ static void check_kmod_is_loaded(void)
  */
 static void check_no_instance_running(void)
 {
-    if ((lock_fd = open(LOADGEND_LOCK_NAME, O_WRONLY|O_CREAT, 0644)) < 0)
+    if ((lock_fd = open(LOADGEND_LOCK_NAME, O_WRONLY|O_CREAT, 0666)) < 0)
         err_exit("open");
 
     if (flock(lock_fd, LOCK_EX | LOCK_NB) < 0) {

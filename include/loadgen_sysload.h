@@ -5,6 +5,9 @@
 #include "loadgen_cpuload.h"
 #include "loadgen_log.h"
 
+/* Size of I/O buffer & read request. */
+#define LOADGEN_READ_BUF_BYTES      4096
+
 /* Number of present CPUs. */
 extern int cpus_onln;
 
@@ -17,6 +20,9 @@ extern int phys_pages;
 /* Memory allocated by daemon (via anonymous mmap).*/
 extern unsigned char *loadgen_mem;
 
+/* Buffer for I/O operations. */
+extern unsigned char *loadgen_iobuf;
+
 /* Pool of various cpu_loads. */
 struct cpu_load *cpu_loads;
 
@@ -24,6 +30,7 @@ struct loadgen_sysload {
     struct cpu_load *cpu_load_user;
     struct cpu_load *cpu_load_kernel;
     int mem_pages_num;
+    int io_msec;
 };
 
 /* System loads: current one and the one we will produce next.*/
@@ -42,7 +49,8 @@ extern int loadgen_sysload_empty(struct loadgen_sysload *sysload);
 extern int loadgen_cpuload_empty(struct cpu_load *cpu_load);
 extern void deallocate_memory(void);
 extern void allocate_memory(void);
-extern void get_block_devname();
+extern void get_block_devname(void);
+extern void loadgen_prepare_iobuf(void);
 
 static inline int roundff(float num)
 {

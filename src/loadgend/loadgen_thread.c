@@ -5,6 +5,9 @@
 #include <signal.h>
 #include <time.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include <math.h>
 
@@ -16,6 +19,7 @@ pthread_t *loadgen_threads = NULL;
 int *is_running = NULL;
 int loadgen_threads_num = -1;
 pthread_attr_t pthread_attr;
+int io_thread_fd = -1;
 
 /* This hack is extremely dirty.
  * Since signals 1..8 are blockable, each CPU thread
@@ -30,14 +34,14 @@ void loadgen_thread_init(void)
     int ret;
 
     /* Initialize array of thread data. */
-    loadgen_threads_num = cpus_onln;
+    loadgen_threads_num = cpus_onln + 1;
     loadgen_threads = malloc(sizeof(*loadgen_threads) * loadgen_threads_num);
-    is_running = malloc(sizeof(*is_running) * cpus_onln);
+    is_running = malloc(sizeof(*is_running) * loadgen_threads_num);
     if (!loadgen_threads || !is_running)
         log_exit("malloc");
     memset((void *) loadgen_threads, 0,
            sizeof(*loadgen_threads) * loadgen_threads_num);
-    memset((void *) is_running, 0, sizeof(*is_running) * cpus_onln);
+    memset((void *) is_running, 0, sizeof(*is_running) * loadgen_threads_num);
 
     /* We're going to launch threads in detached state. */
     if ((ret = pthread_attr_init(&pthread_attr)) != 0) {
@@ -69,6 +73,13 @@ void loadgen_run_threads(void)
                            (void *) &(cur_sysload->cpu_load_user[i])) != 0)
             log_err("pthread_create");
     }
+
+    if (cur_sysload->io_msec > 0) {
+        if (pthread_create(&(loadgen_threads[i]), &pthread_attr,
+                           loadgen_io_thread_fn,
+                           (void *) &(cur_sysload->io_msec)) != 0)
+            log_err("pthread_create");
+    }
 }
 
 void loadgen_kill_threads(void)
@@ -81,6 +92,7 @@ void loadgen_kill_threads(void)
     }
     memset((void *) loadgen_threads, 0,
            sizeof(*loadgen_threads) * loadgen_threads_num);
+    close(io_thread_fd);
 }
 
 static void loadgen_cpu_thread_switch_state(int signo)
@@ -123,6 +135,7 @@ void *loadgen_cpu_thread_fn(void *arg)
     struct timespec sleep_ts;
     unsigned char *mem_begin, *mem_end, *p;
     int fst_iter;
+    unsigned long cpu_nsec, total_nsec;
 
     cpu_load = (struct cpu_load *) arg;
     thread_index = cpu_load->cpu_num;
@@ -165,8 +178,12 @@ void *loadgen_cpu_thread_fn(void *arg)
 
     memset(&work_its, 0, sizeof(struct itimerspec));
     memset(&sleep_ts, 0, sizeof(struct timespec));
-    work_its.it_value.tv_nsec = MSEC_TO_NSEC(load_msec);
-    sleep_ts.tv_nsec = NSEC_PER_SEC - work_its.it_value.tv_nsec;
+    cpu_nsec = LOADGEN_INTERVAL_SECONDS * MSEC_TO_NSEC(load_msec);
+    total_nsec = LOADGEN_INTERVAL_SECONDS * NSEC_PER_SEC;
+    work_its.it_value.tv_sec = cpu_nsec / NSEC_PER_SEC;
+    work_its.it_value.tv_nsec = cpu_nsec % NSEC_PER_SEC;
+    sleep_ts.tv_sec = (total_nsec - cpu_nsec) / NSEC_PER_SEC;
+    sleep_ts.tv_nsec = (total_nsec - cpu_nsec) % NSEC_PER_SEC;
 
     is_running[thread_index] = 1;
     p = mem_begin;
@@ -186,6 +203,74 @@ void *loadgen_cpu_thread_fn(void *arg)
                     p = mem_begin;
                 }
         }
+        clock_nanosleep(LOADGEN_THREAD_CLOCKID, 0, &sleep_ts, NULL);
+        is_running[thread_index] = 1;
+    }
+
+    /* Unreachable. */
+    pthread_exit(NULL);
+}
+
+void *loadgen_io_thread_fn(void *arg)
+{
+    int ret;
+    int io_msec;
+    int thread_index;
+    int open_flags;
+    sigset_t sigset;
+    struct sigaction sa;
+    struct sigevent sev;
+    timer_t timerid;
+    struct itimerspec work_its;
+    struct timespec sleep_ts;
+    unsigned long io_nsec, total_nsec;
+
+    io_msec = *((int *) arg);
+    thread_index = loadgen_threads_num - 1;
+    open_flags = O_RDONLY | O_NONBLOCK | O_DIRECT;
+
+    /* Set thread's sigmask. */
+    sigfillset(&sigset);
+    sigdelset(&sigset, LOADGEN_THREAD_TERM_SIGNAL);
+    sigdelset(&sigset, IND_TO_SIG(thread_index));
+    if ((ret = pthread_sigmask(SIG_SETMASK, &sigset, NULL)) != 0) {
+        errno = ret;
+        thread_log_exit("pthread_sigmask");
+    }
+
+    /* Set signal disposition. */
+    memset(&sa, 0, sizeof(struct sigaction));
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = loadgen_cpu_thread_switch_state;
+    if (sigaction(IND_TO_SIG(thread_index), &sa, NULL) < 0)
+        thread_log_exit("sigaction");
+
+    /* Create the timer. */
+    memset(&sev, 0, sizeof(struct sigevent));
+    sev.sigev_notify = SIGEV_THREAD_ID;
+    sev.sigev_signo = IND_TO_SIG(thread_index);
+    sev._sigev_un._tid = gettid();
+    if (timer_create(LOADGEN_THREAD_CLOCKID, &sev, &timerid) < 0)
+        thread_log_exit("timer_create");
+
+    /* Open I/O device. */
+    if ((io_thread_fd = open(devname, open_flags)) < 0)
+        thread_log_exit("open");
+
+    memset(&work_its, 0, sizeof(struct itimerspec));
+    memset(&sleep_ts, 0, sizeof(struct timespec));
+    io_nsec = LOADGEN_INTERVAL_SECONDS * MSEC_TO_NSEC(io_msec);
+    total_nsec = LOADGEN_INTERVAL_SECONDS * NSEC_PER_SEC;
+    work_its.it_value.tv_sec = io_nsec / NSEC_PER_SEC;
+    work_its.it_value.tv_nsec = io_nsec % NSEC_PER_SEC;
+    sleep_ts.tv_sec = (total_nsec - io_nsec) / NSEC_PER_SEC;
+    sleep_ts.tv_nsec = (total_nsec - io_nsec) % NSEC_PER_SEC;
+
+    is_running[thread_index] = 1;
+    while (1) {
+        timer_settime(timerid, 0, &work_its, NULL);
+        while (is_running[thread_index])
+            read(io_thread_fd, loadgen_iobuf, LOADGEN_READ_BUF_BYTES);
         clock_nanosleep(LOADGEN_THREAD_CLOCKID, 0, &sleep_ts, NULL);
         is_running[thread_index] = 1;
     }

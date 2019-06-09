@@ -32,6 +32,7 @@
 struct sys_load {
     float percent_cpu_user;
     float percent_mem;
+    float percent_io;
 };
 
 class Loadgenctl {
@@ -68,8 +69,13 @@ public:
             un_packet.cpu_num = i;
             internal_send(un_packet);
         }
+
         un_packet.packet_type = UN_MEM;
         un_packet.percent = sys_load.percent_mem;
+        internal_send(un_packet);
+
+        un_packet.packet_type = UN_IO;
+        un_packet.percent = sys_load.percent_io;
         internal_send(un_packet);
     }
 
@@ -107,7 +113,7 @@ int main(int argc, char *argv[])
 {
     Loadgenctl loadgenctl;
     loadgenctl.init();
-    loadgenctl.send_load({13.8, 15.4});
+    loadgenctl.send_load({13.8, 15.4, 23.8});
     loadgenctl.run();
     // loadgenctl.stop();
 

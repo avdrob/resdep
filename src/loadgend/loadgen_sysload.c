@@ -20,6 +20,7 @@ struct loadgen_sysload *cur_sysload = &(loadgen_sysload[0]);
 struct loadgen_sysload *new_sysload = &(loadgen_sysload[1]);
 unsigned char *loadgen_mem = NULL;
 struct cpu_load *cpu_loads = NULL;
+unsigned char *loadgen_iobuf = NULL;
 char devname[64] = "/dev/";
 
 void loadgen_sysload_init(void)
@@ -29,8 +30,9 @@ void loadgen_sysload_init(void)
     page_size = sysconf(_SC_PAGE_SIZE);
     phys_pages = sysconf(_SC_PHYS_PAGES);
 
-    /* Get block device. */
+    /* Get device name and setup I/O buffer. */
     get_block_devname();
+    loadgen_prepare_iobuf();
 
     /* Init loadgen_sysload fields. */
     cpu_loads = malloc(4 * cpus_onln * sizeof(*cpu_loads));
@@ -60,6 +62,7 @@ void reset_sysload(struct loadgen_sysload *sysload)
         sysload->cpu_load_kernel[i] = cpu_load;
     }
     sysload->mem_pages_num = 0;
+    sysload->io_msec = 0;
 }
 
 int loadgen_cpuload_empty(struct cpu_load *cpu_load)
@@ -126,4 +129,23 @@ void get_block_devname(void)
 
     fprintf(stderr, "Couldn't resolve block device name.\nTerminating.\n");
     exit(EXIT_FAILURE);
+}
+
+void loadgen_prepare_iobuf(void)
+{
+    unsigned i;
+
+    loadgen_iobuf = mmap(NULL, LOADGEN_READ_BUF_BYTES, PROT_READ | PROT_WRITE,
+                         MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    if (loadgen_iobuf == MAP_FAILED)
+        log_exit("mmap");
+
+    for (i = 0; i < LOADGEN_READ_BUF_BYTES; i += page_size)
+        loadgen_iobuf[i] = 0;
+
+    if (mlock(loadgen_iobuf, LOADGEN_READ_BUF_BYTES) < 0)
+        log_exit("mlock");
+    mlockall(MCL_CURRENT);
+
+    sync();
 }
