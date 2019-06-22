@@ -100,9 +100,9 @@ static void process_packet(int un_data_sock_fd,
             PROCESS_PACKET_ERR("user(%d) + kernel(%d) load exceeds 100%%",
                                load_msec_user, load_msec_kernel);
 
-        SEND_TO_KERNEL(NL_CPU_LOAD, cpu_num);
         new_sysload->cpu_load_kernel[cpu_num].cpu_num = cpu_num;
         new_sysload->cpu_load_kernel[cpu_num].load_msec = load_msec_kernel;
+        SEND_TO_KERNEL(NL_CPU_LOAD, cpu_num);
         break;
     case UN_MEM:
         CHECK_PERCENT_VALUE;

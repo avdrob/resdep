@@ -10,7 +10,7 @@
 #define LOADGEN_THREAD_TERM_SIGNAL  SIGUSR1
 #define LOADGEN_THREAD_CLOCKID      CLOCK_MONOTONIC
 
-#define LOADGEN_INTERVAL_SECONDS    5
+#define LOADGEN_INTERVAL_SECONDS    1
 
 /* Per-thread data. */
 extern pthread_t *loadgen_threads;

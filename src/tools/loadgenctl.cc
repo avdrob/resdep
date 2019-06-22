@@ -31,6 +31,7 @@
 
 struct sys_load {
     float percent_cpu_user;
+    float percent_cpu_kernel;
     float percent_mem;
     float percent_io;
 };
@@ -63,11 +64,22 @@ public:
     {
         static struct loadgen_packet_un un_packet = {0};
 
-        un_packet.packet_type = UN_CPU_USER;
-        un_packet.percent = sys_load.percent_cpu_user;
-        for (int i = 0; i < 4; ++i) {
-            un_packet.cpu_num = i;
-            internal_send(un_packet);
+        if (sys_load.percent_cpu_user > 0) {
+            un_packet.percent = sys_load.percent_cpu_user;
+            un_packet.packet_type = UN_CPU_USER;
+            for (int i = 0; i < 4; ++i) {
+                un_packet.cpu_num = i;
+                internal_send(un_packet);
+            }
+        }
+
+        if (sys_load.percent_cpu_kernel > 0) {
+            un_packet.percent = sys_load.percent_cpu_kernel;
+            un_packet.packet_type = UN_CPU_KERNEL;
+            for (int i = 0; i < 4; ++i) {
+                un_packet.cpu_num = i;
+                internal_send(un_packet);
+            }
         }
 
         un_packet.packet_type = UN_MEM;
@@ -112,10 +124,18 @@ constexpr struct sockaddr_un Loadgenctl::dest_addr;
 int main(int argc, char *argv[])
 {
     Loadgenctl loadgenctl;
+
+    loadgenctl.stop();
     loadgenctl.init();
-    loadgenctl.send_load({13.8, 15.4, 23.8});
+    loadgenctl.send_load({13.8, 10.8, 15.4, 0.0});
     loadgenctl.run();
+
+    // sleep(15);
+
     // loadgenctl.stop();
+    // loadgenctl.init();
+    // loadgenctl.send_load({23.2, 18.4, 19.0, 30.0});
+    // loadgenctl.run();
 
     return 0;
 }

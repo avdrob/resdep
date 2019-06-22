@@ -5,13 +5,134 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include <sched.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "loadgen_conf.h"
+#include "loadgen_unix.h"
+
+#define err_exit(msg)                                \
+        do {                                         \
+            perror(msg);                             \
+            exit(EXIT_FAILURE);                      \
+        } while (0)
+
+#define log_format(format, ...)                      \
+        do {                                         \
+            fprintf(stderr, format, __VA_ARGS__);    \
+            fprintf(stderr, ": ");                   \
+            perror("");                              \
+        } while (0)
+
+#define err_format_exit(format, ...)                 \
+        do {                                         \
+            log_format(format, __VA_ARGS__);         \
+            exit(EXIT_FAILURE);                      \
+        } while (0)
+
 using namespace std;
+
+struct sys_load {
+    float percent_cpu_user;
+    float percent_cpu_kernel;
+    float percent_mem;
+    float percent_io;
+
+    sys_load(vector<float> load)
+        : percent_cpu_user(load[0]), percent_cpu_kernel(load[1]),
+          percent_mem(load[2]), percent_io(load[3])
+    {}
+};
+
+class Loadgenctl {
+public:
+    static constexpr struct sockaddr_un dest_addr = {
+                                            AF_UNIX,
+                                            LOADGEND_SOCKET_NAME
+                                        };
+
+    Loadgenctl()
+    {
+        if ((sockfd = socket(AF_UNIX, SOCK_SEQPACKET, 0)) < 0)
+            err_format_exit("socket(%s)", LOADGEND_SOCKET_NAME);
+        if (connect(sockfd, (struct sockaddr *) &dest_addr,
+                    sizeof(dest_addr)) < 0)
+            err_format_exit("connect(%s)", LOADGEND_SOCKET_NAME);
+    }
+
+    ~Loadgenctl() { close(sockfd); }
+
+    void init() const
+    {
+        static struct loadgen_packet_un un_packet = {{0}, UN_INIT};
+        internal_send(un_packet);
+    }
+
+    void send_load(const struct sys_load &sys_load) const
+    {
+        static struct loadgen_packet_un un_packet = {0};
+
+        if (sys_load.percent_cpu_user > 0) {
+            un_packet.percent = sys_load.percent_cpu_user;
+            un_packet.packet_type = UN_CPU_USER;
+            for (int i = 0; i < 4; ++i) {
+                un_packet.cpu_num = i;
+                internal_send(un_packet);
+            }
+        }
+
+        if (sys_load.percent_cpu_kernel > 0) {
+            un_packet.percent = sys_load.percent_cpu_kernel;
+            un_packet.packet_type = UN_CPU_KERNEL;
+            for (int i = 0; i < 4; ++i) {
+                un_packet.cpu_num = i;
+                internal_send(un_packet);
+            }
+        }
+
+        un_packet.packet_type = UN_MEM;
+        un_packet.percent = sys_load.percent_mem;
+        internal_send(un_packet);
+
+        un_packet.packet_type = UN_IO;
+        un_packet.percent = sys_load.percent_io;
+        internal_send(un_packet);
+    }
+
+    void run() const
+    {
+        static struct loadgen_packet_un un_packet = {{0}, UN_RUN};
+        internal_send(un_packet);
+    }
+
+    void stop() const
+    {
+        static struct loadgen_packet_un un_packet = {{0}, UN_STOP};
+        internal_send(un_packet);
+    }
+
+private:
+    int sockfd;
+
+    void internal_send(const loadgen_packet_un &un_packet) const
+    {
+        static loadgen_packet_un un_response = {0};
+
+        if (send(sockfd, (const void *) &un_packet, sizeof(un_packet), 0) < 0)
+            err_format_exit("send(%d)", un_packet.packet_type);
+        if (recv(sockfd, (void *) &un_response,
+                 sizeof(un_response), 0) < 0)
+            log_format("recv(%d)", un_packet.packet_type);
+        if (un_response.packet_type != UN_OK)
+            log_format("loadgend: %s", un_response.errmsg);
+    }
+};
+constexpr struct sockaddr_un Loadgenctl::dest_addr;
 
 class measurer {
 public:
@@ -140,8 +261,8 @@ public:
     double get_util_percent(unsigned long long itv) const
     {
         /* tot_ticks are in milliseconds, itv is in jiffies (0.01s). */
-        return 10 * share(diff(diskstat[1 - current].tot_ticks,
-                               diskstat[current].tot_ticks),
+        return 10 * share(diff(diskstat[1 - current].rd_ticks,
+                               diskstat[current].rd_ticks),
                           static_cast<double>(itv));
     }
 
@@ -254,16 +375,16 @@ private:
 constexpr const char *memory_measurer::meminfo_fields[];
 constexpr size_t memory_measurer::meminfo_fields_cnt;
 
-// void __attribute__((constructor)) set_prio(void)
-// {
-//     struct sched_param param;
-// 
-//     param.sched_priority = 90;
-//     if (sched_setscheduler(0, SCHED_FIFO, &param) < 0) {
-//         perror("sched_setscheduler");
-//         exit(EXIT_FAILURE);
-//     }
-// }
+void __attribute__((constructor)) set_prio(void)
+{
+    struct sched_param param;
+
+    param.sched_priority = 90;
+    if (sched_setscheduler(0, SCHED_FIFO, &param) < 0) {
+        perror("sched_setscheduler");
+        exit(EXIT_FAILURE);
+    }
+}
 
 void measure(vector<measurer *> meters)
 {
@@ -273,23 +394,47 @@ void measure(vector<measurer *> meters)
 
 int main(int argc, char *argv[])
 {
+    Loadgenctl loadgenctl;
     time_measurer tm;
     cpu_measurer cm;
     disk_measurer dm;
     memory_measurer mm;
     unsigned long long itv;
 
-    measure({&tm, &cm, &dm, &mm});
-    itv = tm.get_interval();
+    vector<vector<float>> loads = {
+                                    {28.5, 19.4, 13.0, 12.7},
+                                    {13.8, 10.8, 15.4, 0.0},
+                                    {11.4, 32.8, 14.9, 43.2},
+                                    {27.3, 27.3, 18.5, 25.2},
+                                    {25.2, 17.8, 20.0, 50.0}
+                                  };
 
     cout.precision(2);
     cout << fixed;
 
-    cout << "Uptime: " << itv << endl;
-    cout << "User%: " << cm.get_user_percent() << endl;
-    cout << "System%: " << cm.get_system_percent() << endl;
-    cout << "Disk%: " << dm.get_util_percent(itv) << endl;
-    cout << "Memory%: " << mm.get_mem_percent() << endl;
+    for (const auto load : loads) {
+        loadgenctl.stop();
+        loadgenctl.init();
+        loadgenctl.send_load(sys_load(load));
+        loadgenctl.run();
+
+        sleep(50);
+        measure({&tm, &cm, &dm, &mm});
+        sleep(10);
+        measure({&tm, &cm, &dm, &mm});
+        itv = tm.get_interval();
+
+        cout << load[0] << ' ' << load[1] << ' ' << load[2] << ' ' << load[3]
+             << ": " << cm.get_user_percent() << ' ' << cm.get_system_percent()
+             << ' ' << mm.get_mem_percent() << ' ' << dm.get_util_percent(itv)
+             << endl;
+    }
+
+    // cout << "Uptime: " << itv << endl;
+    // cout << "User%: " << cm.get_user_percent() << endl;
+    // cout << "System%: " << cm.get_system_percent() << endl;
+    // cout << "Disk%: " << dm.get_util_percent(itv) << endl;
+    // cout << "Memory%: " << mm.get_mem_percent() << endl;
 
     return 0;
 }

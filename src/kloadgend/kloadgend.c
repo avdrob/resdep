@@ -139,6 +139,7 @@ static void kloadgend_stop_threads(void)
                 !IS_ERR(hog_data[i].hog_thread)) {
             kthread_stop(hog_data[i].hog_thread);
             hog_data[i].hog_thread = NULL;
+            hog_data[i].cpu_active = false;
             cnt++;
         }
     }
@@ -185,20 +186,20 @@ static void nl_recv_msg(struct sk_buff *skb)
 
     switch (nl_packet->packet_type) {
     case NL_INIT:
-        if (nlh->nlmsg_seq != 0) {
-            printk(KERN_ERR "[%s]: nlmsg sequence number "
-                   "mismatch: should be 0, but received %d\n",
-                   KMOD_NAME, nlh->nlmsg_seq);
-            return;
-        }
+        // if (nlh->nlmsg_seq != 0) {
+        //     printk(KERN_ERR "[%s]: nlmsg sequence number "
+        //            "mismatch: should be 0, but received %d\n",
+        //            KMOD_NAME, nlh->nlmsg_seq);
+        //     return;
+        // }
         reset_hog_data();
         break;
 
     case NL_CPU_LOAD:
         /* Here we receive CPU loads */
-        if (!nl_check_pid_and_seq(nlh->nlmsg_pid, pid,
-                                  nlh->nlmsg_seq, seq))
-            return;
+        // if (!nl_check_pid_and_seq(nlh->nlmsg_pid, pid,
+        //                           nlh->nlmsg_seq, seq))
+        //     return;
 
         cpu_num = (nl_packet->cpu_load).cpu_num;
         load_msec = (nl_packet->cpu_load).load_msec;
@@ -223,16 +224,16 @@ static void nl_recv_msg(struct sk_buff *skb)
 
     case NL_RUN:
         /* Run all threads at once. */
-        if (!nl_check_pid_and_seq(nlh->nlmsg_pid, pid,
-                                  nlh->nlmsg_seq, seq))
-            return;
+        // if (!nl_check_pid_and_seq(nlh->nlmsg_pid, pid,
+        //                           nlh->nlmsg_seq, seq))
+        //     return;
         kloadgend_run_threads();
         break;
 
     case NL_STOP:
-        if (!nl_check_pid_and_seq(nlh->nlmsg_pid, pid,
-                                  nlh->nlmsg_seq, seq))
-            return;
+        // if (!nl_check_pid_and_seq(nlh->nlmsg_pid, pid,
+        //                           nlh->nlmsg_seq, seq))
+        //     return;
         kloadgend_stop_threads();
         reset_hog_data();
         break;

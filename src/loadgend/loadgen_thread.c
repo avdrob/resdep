@@ -86,7 +86,8 @@ void loadgen_kill_threads(void)
 {
     int i;
     for (i = 0; i < loadgen_threads_num; ++i) {
-        if (pthread_kill(loadgen_threads[i], LOADGEN_THREAD_TERM_SIGNAL) < 0) {
+        if (loadgen_threads[i] != (pthread_t) 0 &&
+            pthread_kill(loadgen_threads[i], LOADGEN_THREAD_TERM_SIGNAL) < 0) {
             log_err("pthread_kill");
         }
     }
@@ -136,6 +137,7 @@ void *loadgen_cpu_thread_fn(void *arg)
     unsigned char *mem_begin, *mem_end, *p;
     int fst_iter;
     unsigned long cpu_nsec, total_nsec;
+    double dummy;
 
     cpu_load = (struct cpu_load *) arg;
     thread_index = cpu_load->cpu_num;
@@ -193,8 +195,11 @@ void *loadgen_cpu_thread_fn(void *arg)
         while (is_running[thread_index]) {
             if ((long int) p % page_size == 0)
                 *p = sqrt((long int) p);
-            if (!fst_iter)
+            if (!fst_iter) {
                 p = p < mem_end - 1 ? p + 1 : mem_begin;
+                dummy = sqrt((long int) p);
+            }
+
             else
                 if (p + page_size + 1 < mem_end)
                     p += page_size;
@@ -270,7 +275,9 @@ void *loadgen_io_thread_fn(void *arg)
     while (1) {
         timer_settime(timerid, 0, &work_its, NULL);
         while (is_running[thread_index])
-            read(io_thread_fd, loadgen_iobuf, LOADGEN_READ_BUF_BYTES);
+            if (read(io_thread_fd, loadgen_iobuf, LOADGEN_READ_BUF_BYTES) <
+                LOADGEN_READ_BUF_BYTES)
+                lseek(io_thread_fd, 0, SEEK_SET);
         clock_nanosleep(LOADGEN_THREAD_CLOCKID, 0, &sleep_ts, NULL);
         is_running[thread_index] = 1;
     }
